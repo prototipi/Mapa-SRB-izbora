@@ -180,5 +180,5 @@
   "Map": "Karta",
   "Drawn with {d3}.": "Nacrtano pomoću biblioteke {d3}.",
   "Details": "Detalji",
-  "All decisions and sources: {dec}. Code and data: {repo}.": "Sve odluke i izvori: {dec}. Kod i podaci: {repo}."
+  "Use two fingers to move the map": "Pomerajte kartu sa dva prsta",  "All decisions and sources: {dec}. Code and data: {repo}.": "Sve odluke i izvori: {dec}. Kod i podaci: {repo}."
 }

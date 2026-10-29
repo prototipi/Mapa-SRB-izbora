@@ -150,6 +150,9 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 440px; min-height: 0
   box-shadow: 0 8px 24px rgba(0,0,0,.14); font-size: 12.5px;
 }
 .tip b { display: block; font-size: 13.5px; margin-bottom: 1px; }
+/* Phone: hint when one finger tries to move the zoomed map */
+.touchhint { position: absolute; left: 50%; top: max(31vh, 180px); transform: translate(-50%, -50%); z-index: 6; pointer-events: none;
+  padding: 8px 14px; border-radius: 8px; background: rgba(15,23,34,.82); color: #fff; font-size: 13.5px; font-weight: 500; white-space: nowrap; }
 .tip .sub { color: var(--muted); font-size: 11.5px; margin-bottom: 6px; }
 .tip .kv { display: grid; grid-template-columns: auto 1fr auto; gap: 3px 8px; align-items: center; }
 .tip .kv .r { text-align: right; font-variant-numeric: tabular-nums; }
@@ -255,7 +258,7 @@ td a { color: var(--ink-2); }
   main { display: block; }
   /* Phone: the legend and the off-map buttons go below the map, so they do not cover it */
   .mapwrap { height: auto; overflow: visible; }
-  #map { height: 62vh; min-height: 360px; }
+  #map { height: 62vh; min-height: 360px; touch-action: pan-x pan-y; }  /* one finger scrolls the page; two fingers move the map */
   .mapwrap.is-abroad #map { height: 0; min-height: 0; }
   .mapwrap.is-abroad .abroad { position: static; }
   .azoom { position: fixed; z-index: 30; }
@@ -310,6 +313,7 @@ td a { color: var(--ink-2); }
       <div class="abroad" id="abroad" hidden></div>
       <div class="azoom" id="azoom" hidden></div>
       <div class="tip" id="tip" hidden></div>
+      <div class="touchhint" id="touchhint" hidden>{{t:Use two fingers to move the map}}</div>
     </div>
     <aside><div class="panel" id="panel"></div></aside>
   </main>
@@ -758,7 +762,11 @@ function drawRegion() {
     .attr('y', f => projection(REGION_LABEL[f.cc] || d3.geoCentroid(f))[1])
     .style('font-size', 11 / curK + 'px').style('stroke-width', 3 / curK + 'px');
 }
-const zoom = d3.zoom().scaleExtent([1, 40]).on('zoom', e => {
+// Phone layout (the page scrolls): one finger scrolls the page, two fingers move and zoom the map
+const stacked = matchMedia('(max-width: 860px)');
+const zoom = d3.zoom().scaleExtent([1, 40])
+  .filter(e => e.type.startsWith('touch') && stacked.matches ? e.touches.length > 1 : (!e.ctrlKey || e.type === 'wheel') && !e.button)
+  .on('zoom', e => {
   g.attr('transform', e.transform); curK = e.transform.k;
   labels.selectAll('text').style('font-size', 11 / curK + 'px').style('stroke-width', 3 / curK + 'px');
   cull();
@@ -768,6 +776,13 @@ const zoom = d3.zoom().scaleExtent([1, 40]).on('zoom', e => {
     .attr('cy', p => projection([p.lon, p.lat])[1] + PRISON_POS.get(p)[1] / curK);
 });
 svg.call(zoom).on('dblclick.zoom', null);
+const touchHint = document.getElementById('touchhint');
+let hintTimer;
+svg.on('touchmove.hint', e => {
+  if (!stacked.matches || e.touches.length > 1 || curK < 1.05) return;
+  touchHint.hidden = false; clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => { touchHint.hidden = true; }, 1500);
+}, { passive: true });
 const motion = () => matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1;
 function zoomTo(features, maxK = 12) {
   const [[x0, y0], [x1, y1]] = path.bounds({ type: 'FeatureCollection', features });

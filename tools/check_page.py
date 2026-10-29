@@ -256,7 +256,7 @@ def run(out, headed):
         check(not bad, f'page starts from all {len(saved_states())} saved views' + ('' if not bad else f'; {len(bad)} fail, first: {bad[0]}'))
 
         print('\n== Phone width (400 px)')
-        ctx = browser.new_context(viewport={'width': 400, 'height': 820}, device_scale_factor=2)
+        ctx = browser.new_context(viewport={'width': 400, 'height': 820}, device_scale_factor=2, has_touch=True)
         page = ctx.new_page()
         errors = []
         page.on('pageerror', lambda e: errors.append(str(e)))
@@ -267,6 +267,35 @@ def run(out, headed):
         check(s['overflowX'] <= 0, f'no sideways scrolling (overflow {s["overflowX"]} px)')
         page.screenshot(path=str(out / 'phone_top.png'))
         page.screenshot(path=str(out / 'phone_full.png'), full_page=True)
+        check(page.evaluate("getComputedStyle(document.getElementById('map')).touchAction") == 'pan-x pan-y',
+              'one finger scrolls the page over the map (touch-action: pan-x pan-y)')
+        box = page.locator('#map').bounding_box()
+        page.touchscreen.tap(box['x'] + box['width'] * .5, box['y'] + box['height'] * .45); page.wait_for_timeout(300)
+        page.wait_for_timeout(500)  # smooth scroll to the panel
+        top = page.evaluate("Math.round(document.querySelector('aside').getBoundingClientRect().top)")
+        check(state(page)['panelTitle'] not in ('', 'Serbia') and abs(top) < 40,
+              f'a tap on a municipality selects it and scrolls to its results ({state(page)["panelTitle"]}, panel top {top} px)')
+        page.screenshot(path=str(out / 'phone_tap.png'))
+        page.evaluate('scrollTo(0, 0)'); page.wait_for_timeout(300)
+        # Touch gestures on the map (Chrome DevTools Protocol): one finger scrolls the page, two fingers zoom the map
+        cdp = ctx.new_cdp_session(page)
+        def gesture(starts, ends, steps=12):
+            pts = lambda f: [{'x': s[0] + (e[0] - s[0]) * f, 'y': s[1] + (e[1] - s[1]) * f, 'id': i} for i, (s, e) in enumerate(zip(starts, ends))]
+            cdp.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': pts(0)})
+            for i in range(1, steps + 1):
+                cdp.send('Input.dispatchTouchEvent', {'type': 'touchMove', 'touchPoints': pts(i / steps)}); page.wait_for_timeout(16)
+            cdp.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []}); page.wait_for_timeout(400)
+        zoom_k = lambda: page.evaluate("d3.zoomTransform(document.getElementById('map')).k")
+        box = page.locator('#map').bounding_box(); cx, cy = box['x'] + box['width'] / 2, box['y'] + box['height'] / 2
+        gesture([(cx, cy + 120)], [(cx, cy - 180)])
+        check(page.evaluate('scrollY') > 100 and zoom_k() == 1, f'one-finger swipe on the map scrolls the page (scrollY {page.evaluate("scrollY")})')
+        page.evaluate('scrollTo(0, 0)'); page.wait_for_timeout(300)
+        box = page.locator('#map').bounding_box(); cx, cy = box['x'] + box['width'] / 2, box['y'] + box['height'] / 2
+        gesture([(cx - 30, cy), (cx + 30, cy)], [(cx - 120, cy), (cx + 120, cy)])
+        check(zoom_k() > 2, f'two-finger spread zooms the map (scale {zoom_k():.1f})')
+        gesture([(cx, cy + 100)], [(cx, cy + 40)], steps=4)
+        check(page.evaluate("!document.getElementById('touchhint').hidden"), 'one finger on the zoomed map shows the two-finger hint')
+        page.click('#zreset'); page.wait_for_timeout(700)
         click(page, '#cat-abroad')
         check(state(page)['overflowX'] <= 0, 'no sideways scrolling in the Abroad view')
         page.screenshot(path=str(out / 'phone_abroad.png'))
