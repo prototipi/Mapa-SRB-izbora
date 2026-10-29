@@ -1,0 +1,1262 @@
+<!doctype html>
+<html lang="__LANG__">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{t:Serbia Election Map 2023–2026}}</title>
+<!-- Standalone page: d3 is included below. The fonts load from Google Fonts when online; otherwise the system font is used. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=Unbounded:wght@500;600&display=swap">
+<style>
+/* Layout: one-screen app. Header strip, then the map (left, fills) beside a results panel (right, scrolls). Stacks on phones.
+   pa / pb = the main list and the main challenger of each election; lx = any other list; vi = turnout. */
+:root {
+  --bg: #eef1f4; --surface: #fbfcfd; --ink: #0f1722; --ink-2: #4a5462; --muted: #848c98;
+  --line: #d9dee5; --line-2: #c3cad3; --hover: rgba(15,23,34,.06); --focus: #2a78d6;
+  --pa: #2a78d6; --pa-lo: #cde2fb; --pa-hi: #0d366b;
+  --pb: #eb6834; --pb-lo: #fbd9c9; --pb-hi: #7a2a0c;
+  --lx: #1baf7a; --lx-lo: #c9efe0; --lx-hi: #0b5c3f;
+  --vi: #6250d6; --vi-lo: #dcd8f7; --vi-hi: #2a1f73;
+  --fl-ab: #a8327a; --fl-bb: #9e1c22; --fl-ba: #5b4fcf;  /* Winner change: 1→3 reddish purple, 7 and 3 dark red, 7→1 bluish purple */
+  --neutral: #e6e5e1; --nodata: #e3e7ec; --stroke: #c9d0d8; --land: #e1e6ec;
+  --f-display: "Unbounded", "Golos Text", system-ui, sans-serif;
+  --f-body: "Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1116; --surface: #161a20; --ink: #eef1f4; --ink-2: #b8c0cb; --muted: #858e9b;
+  --line: #262c35; --line-2: #343c47; --hover: rgba(238,241,244,.07); --focus: #3987e5;
+  --pa: #3987e5; --pa-lo: #1b2a3f; --pa-hi: #b7d3f6;
+  --pb: #d95926; --pb-lo: #3a2219; --pb-hi: #f8c7af;
+  --lx: #199e70; --lx-lo: #16302a; --lx-hi: #a8e6cf;
+  --vi: #9085e9; --vi-lo: #25223f; --vi-hi: #d9d4fa;
+  --fl-ab: #b8509a; --fl-bb: #ad2e2c; --fl-ba: #8579ea;
+  --neutral: #3a3a37; --nodata: #1f242c; --stroke: #161a20; --land: #232933; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #0e1116; --surface: #161a20; --ink: #eef1f4; --ink-2: #b8c0cb; --muted: #858e9b;
+  --line: #262c35; --line-2: #343c47; --hover: rgba(238,241,244,.07); --focus: #3987e5;
+  --pa: #3987e5; --pa-lo: #1b2a3f; --pa-hi: #b7d3f6;
+  --pb: #d95926; --pb-lo: #3a2219; --pb-hi: #f8c7af;
+  --lx: #199e70; --lx-lo: #16302a; --lx-hi: #a8e6cf;
+  --vi: #9085e9; --vi-lo: #25223f; --vi-hi: #d9d4fa;
+  --fl-ab: #b8509a; --fl-bb: #ad2e2c; --fl-ba: #8579ea;
+  --neutral: #3a3a37; --nodata: #1f242c; --stroke: #161a20; --land: #232933; color-scheme: dark;
+}
+html, body { height: 100%; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(--f-body); }
+* { box-sizing: border-box; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+
+.app { height: 100%; display: grid; grid-template-rows: auto 1fr; }
+header {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+  padding-block: 12px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-bottom: 1px solid var(--line); background: var(--surface);
+}
+.brand { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.brand h1 { margin: 0; font: 600 16px/1.2 var(--f-display); letter-spacing: -.01em; text-wrap: balance; }
+.brand p { margin: 0; color: var(--ink-2); font-size: 12.5px; }
+#lang { padding: 3px 6px; font-size: 12.5px; border-radius: 6px; }
+.brandrow { display: flex; align-items: center; gap: 10px; }
+.linkbtn { border: 0; background: none; padding: 2px 0; cursor: pointer; color: var(--ink-2); font-size: 12.5px; text-decoration: underline; text-underline-offset: 2px; }
+.linkbtn:hover { color: var(--ink); }
+/* Sources dialog */
+#sources { width: min(600px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 18px 20px 20px; border: 1px solid var(--line-2); border-radius: 12px;
+  background: var(--surface); color: var(--ink); box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+#sources::backdrop { background: rgba(15,23,34,.4); }
+#sources h2 { margin: 0 0 12px; font: 600 15px/1.3 var(--f-display); }
+#sources dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 0; font-size: 13px; }
+#sources dt { font-weight: 600; }
+#sources dd { margin: 0; color: var(--ink-2); }
+#sources a { color: var(--focus); }
+#sources .x { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border: 0; border-radius: 6px; background: none; cursor: pointer; color: var(--ink-2); font-size: 20px; line-height: 1; }
+#sources .x:hover { background: var(--hover); color: var(--ink); }
+@media (max-width: 560px) { #sources dl { grid-template-columns: 1fr; gap: 2px; } #sources dd { margin-bottom: 8px; } }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line-2); border-radius: 8px; padding: 2px; background: var(--bg); }
+.seg button { border: 0; background: none; padding: 5px 9px; border-radius: 6px; cursor: pointer; color: var(--ink-2); font-weight: 500; font-size: 12.5px; }
+.seg button:hover { color: var(--ink); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+.seg.years button { font-weight: 600; }
+.seg.sm button { padding: 3px 9px; font-size: 12px; }
+select, input[type="search"] {
+  border: 1px solid var(--line-2); background: var(--surface); border-radius: 8px; padding: 6px 9px; font-size: 13px; max-width: 100%;
+}
+#listSel { max-width: 230px; }
+#search { width: 150px; }
+
+main { display: grid; grid-template-columns: minmax(0, 1fr) 440px; min-height: 0; }
+.mapwrap { position: relative; min-height: 0; overflow: hidden; }
+#map { display: block; width: 100%; height: 100%; touch-action: none; }
+#map path.unit { stroke: var(--stroke); stroke-width: .6px; vector-effect: non-scaling-stroke; cursor: pointer; }
+#map path.unit.empty { cursor: default; }
+#map path.unit:hover:not(.empty) { stroke: var(--ink); stroke-width: 1.2px; }
+/* Top left of the map: level switch and (List share view) the list menu */
+.maptop { position: absolute; left: max(12px, env(safe-area-inset-left, 0px)); top: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: calc(100% - 90px); }
+.levels { background: var(--surface); }
+.legend.static #listSel { flex-basis: 100%; max-width: 360px; }
+#map path.gborder { fill: none; stroke: var(--stroke); stroke-width: 1.4px; vector-effect: non-scaling-stroke; pointer-events: none; }
+#map path.hov { fill: none; stroke: var(--ink); stroke-width: 1.4px; vector-effect: non-scaling-stroke; pointer-events: none; }
+#map path.rland { stroke: var(--surface); stroke-width: 1.2px; vector-effect: non-scaling-stroke; stroke-linejoin: round; cursor: pointer; }
+#map path.rland.ctx { cursor: default; }
+#map text.rname { fill: var(--muted); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; text-anchor: middle; dominant-baseline: central;
+  paint-order: stroke; stroke: var(--bg); stroke-linejoin: round; pointer-events: none; }
+#map circle.prison { stroke: var(--ink); vector-effect: non-scaling-stroke; stroke-width: 1.4px; cursor: pointer; }
+#map circle.prison:hover, #map circle.prison.on { stroke-width: 2.6px; }
+#map path.sel { fill: none; stroke: var(--ink); stroke-width: 2.4px; vector-effect: non-scaling-stroke; pointer-events: none; }
+#map text.lbl { fill: var(--ink); font-weight: 600; text-anchor: middle; dominant-baseline: central; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
+.hatch-line { stroke: var(--line-2); stroke-width: 1.2; }
+
+.legend {
+  position: absolute; left: max(12px, env(safe-area-inset-left, 0px)); bottom: 12px; max-width: min(380px, calc(100% - 24px));
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; box-shadow: 0 4px 16px rgba(0,0,0,.06);
+}
+.legend h3 { margin: 0 0 7px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+.legend .rows { display: flex; flex-direction: column; gap: 4px; }
+.legend .row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.legend .cnt { margin-left: auto; padding-left: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.legend .bins { display: flex; }
+.legend .bins span { width: 30px; height: 12px; }
+.legend .bins span + span { margin-left: 1px; }
+.legend .ticks { position: relative; height: 15px; font-size: 11px; color: var(--ink-2); }
+.legend .ticks span { position: absolute; top: 1px; transform: translateX(-50%); }
+.legend .ends { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; color: var(--muted); margin-top: 3px; }
+.legend .lnote { margin: 6px 0 0; font-size: 11.5px; color: var(--ink-2); line-height: 1.4; }
+.sw { width: 12px; height: 12px; border-radius: 3px; flex: none; display: inline-block; }
+.sw.nd { background: repeating-linear-gradient(45deg, var(--nodata) 0 3px, var(--line-2) 3px 4px); }
+
+.zoom { position: absolute; right: 12px; top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.zoom button { min-width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); cursor: pointer; font-weight: 600; padding: 0 9px; }
+.zoom button:hover { background: var(--bg); }
+.zoom button[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.zoom .numctl { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.zoom .numctl[hidden] { display: none; }
+.zoom #znum { display: inline-flex; align-items: center; justify-content: center; }
+.legend .aunits { margin-bottom: 8px; }
+/* Map options (bottom right): Show: [ ] Prisons */
+.offmap { position: absolute; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; }
+.offmap .cap { color: var(--ink-2); }
+.offmap .opt { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.offmap input { margin: 0; accent-color: var(--ink); width: 15px; height: 15px; cursor: pointer; }
+
+.tip {
+  position: absolute; pointer-events: none; z-index: 5; min-width: 220px; max-width: 320px;
+  background: var(--surface); border: 1px solid var(--line-2); border-radius: 10px; padding: 9px 11px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.14); font-size: 12.5px;
+}
+.tip b { display: block; font-size: 13.5px; margin-bottom: 1px; }
+.tip .sub { color: var(--muted); font-size: 11.5px; margin-bottom: 6px; }
+.tip .kv { display: grid; grid-template-columns: auto 1fr auto; gap: 3px 8px; align-items: center; }
+.tip .kv .r { text-align: right; font-variant-numeric: tabular-nums; }
+.tip .cmp { display: grid; grid-template-columns: 1fr auto auto auto; gap: 3px 10px; align-items: center; }
+.tip .cmp .r { text-align: right; font-variant-numeric: tabular-nums; }
+.tip .cmp .h { color: var(--muted); font-size: 11px; text-align: right; }
+
+/* Abroad: one block per country, drawn over the Serbia map */
+.abroad { position: absolute; inset: 0; z-index: 3; background: var(--bg); overflow-y: auto; padding-block: 14px 28px;
+  padding-left: max(14px, env(safe-area-inset-left, 0px)); padding-right: max(14px, env(safe-area-inset-right, 0px)); }
+.mapwrap.is-region .levels, .mapwrap.is-region .offmap { display: none; }
+.mapwrap.is-region #map path.gborder { stroke: var(--surface); }  /* country borders on the Region map */
+.mapwrap.is-abroad .zoom, .mapwrap.is-abroad .offmap, .mapwrap.is-abroad .maptop, .mapwrap.is-abroad > .legend { display: none; }
+.legend.static { position: static; max-width: none; box-shadow: none; display: flex; flex-wrap: wrap; gap: 6px 28px; align-items: flex-start; }
+.legend.static > div, .legend.static > p { min-width: 0; }
+.legend.static .lnote { margin: 0; flex-basis: 100%; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; margin-top: 12px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 10px 8px; cursor: pointer;
+  display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.card:hover { border-color: var(--line-2); }
+.card[aria-pressed="true"] { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.card .ch { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.card .cn { font-weight: 600; font-size: 13.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .cv { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.card svg { display: block; width: 100%; height: auto; }
+.card .land { stroke: var(--line-2); stroke-width: .8; stroke-linejoin: round; }
+.card .dot { stroke: var(--surface); stroke-width: 1.1; }
+.card .dot.old { fill: none; stroke: var(--ink-2); stroke-width: 1.3; }
+.card .dot:hover { stroke: var(--ink); stroke-width: 1.6; }
+.card .cs { font-size: 11.5px; color: var(--muted); display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
+.card .cs > span { min-width: 0; }
+.card .zbtn { flex: none; }
+.card .zbtn { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 1px 7px; font-size: 11.5px; cursor: pointer; color: var(--ink-2); }
+.card .zbtn:hover { border-color: var(--ink-2); color: var(--ink); }
+/* One country, large, with zoom (opened from a block with more than one polling station) */
+.azoom { position: absolute; inset: 0; z-index: 4; background: var(--bg); display: flex; flex-direction: column; }
+.azoom[hidden] { display: none; }
+.azoom .zh { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-block: 10px; background: var(--surface); border-bottom: 1px solid var(--line);
+  padding-left: max(14px, env(safe-area-inset-left, 0px)); padding-right: max(14px, env(safe-area-inset-right, 0px)); }
+.azoom .zh h3 { margin: 0; font: 600 17px/1.2 var(--f-display); }
+.azoom .zh .cv { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.azoom .zh .note { flex-basis: 100%; }
+.azoom .zh .sp { flex: 1; }
+.azoom .zh button { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; min-width: 34px; height: 32px; padding: 0 10px; cursor: pointer; font-weight: 600; }
+.azoom .zh button:hover { background: var(--bg); }
+.azoom svg { flex: 1; min-height: 0; width: 100%; display: block; touch-action: none; cursor: grab; }
+.azoom .land { stroke: var(--line-2); stroke-width: 1px; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.azoom .dot { stroke: var(--surface); stroke-width: 1.4px; vector-effect: non-scaling-stroke; cursor: default; }
+.azoom .dot.old { fill: none; stroke: var(--ink-2); stroke-width: 1.6px; }
+.azoom .dot:hover { stroke: var(--ink); stroke-width: 2.2px; }
+.azoom .clbl { fill: var(--ink-2); paint-order: stroke; stroke: var(--bg); stroke-linejoin: round; dominant-baseline: central; pointer-events: none; }
+
+aside { border-left: 1px solid var(--line); background: var(--surface); overflow-y: auto; min-height: 0; }
+.panel { padding: 18px 20px 28px; display: flex; flex-direction: column; gap: 18px; }
+.ptop { display: flex; align-items: flex-start; gap: 12px; }
+.ptop > div { flex: 1; min-width: 0; }
+.eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.ptop h2 { margin: 3px 0 2px; font: 600 21px/1.2 var(--f-display); letter-spacing: -.01em; text-wrap: balance; }
+.ptop .meta { color: var(--ink-2); font-size: 12.5px; }
+.close { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 5px 10px; cursor: pointer; font-size: 12.5px; flex: none; }
+.close:hover { background: var(--bg); }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin: 0; }
+.stats div { background: var(--surface); padding: 9px 11px; min-width: 0; }
+.stats dt { font-size: 11px; color: var(--muted); }
+.stats dd { margin: 1px 0 0; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stats dd small { font-size: 11.5px; font-weight: 400; color: var(--ink-2); }
+.sec h4 { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-2); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.sec h4 span { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); }
+.bars { display: flex; flex-direction: column; gap: 7px; }
+.bar { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; }
+.bar .no { font-size: 11px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.bar .nm { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar .pc { font-size: 13px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.bar .track { grid-column: 2 / 4; position: relative; height: 6px; }
+.bar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 0 3px 3px 0; min-width: 1px; }
+.bar .thr { position: absolute; top: -3px; bottom: -3px; border-left: 1px dashed var(--muted); }
+.bar .vv { grid-column: 2 / 4; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: -1px; }
+.more { border: 0; background: none; color: var(--ink-2); padding: 2px 0; cursor: pointer; font-size: 12.5px; text-decoration: underline; text-underline-offset: 3px; justify-self: start; margin-top: 4px; }
+.note { font-size: 12px; color: var(--muted); margin: 0; }
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th, td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.st th:nth-child(2), .st td:nth-child(2) { text-align: left; white-space: normal; min-width: 150px; }
+th { position: sticky; top: 0; background: var(--surface); font-weight: 600; font-size: 11.5px; color: var(--ink-2); }
+.st th[data-k] { cursor: pointer; user-select: none; }
+th[aria-sort="ascending"]::after { content: " ↑"; }
+th[aria-sort="descending"]::after { content: " ↓"; }
+tbody tr:hover { background: var(--hover); }
+tbody tr:last-child td { border-bottom: 0; }
+.cmpt td:first-child, .cmpt th:first-child { text-align: left; white-space: normal; }
+.cmpt td:last-child { font-weight: 600; }
+.cmpt .sw { width: 9px; height: 9px; margin-right: 6px; vertical-align: baseline; }
+td.pending { color: var(--muted); font-style: italic; }
+td a { color: var(--ink-2); }
+.chip { display: inline-block; min-width: 22px; padding: 1px 5px; border-radius: 5px; font-size: 11px; font-weight: 600; text-align: center; color: #fff; }
+.cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.cols2 > * { min-width: 0; }
+.cols2 .bar { grid-template-columns: 18px minmax(0, 1fr) auto; gap: 2px 6px; }
+.cols2 .bar .nm, .cols2 .bar .pc { font-size: 12px; }
+
+@media (max-width: 860px) {
+  .app { height: auto; display: block; }
+  main { display: block; }
+  /* Phone: the legend and the off-map buttons go below the map, so they do not cover it */
+  .mapwrap { height: auto; overflow: visible; }
+  #map { height: 62vh; min-height: 360px; }
+  .mapwrap.is-abroad #map { height: 0; min-height: 0; }
+  .mapwrap.is-abroad .abroad { position: static; }
+  .azoom { position: fixed; z-index: 30; }
+  aside { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+  .panel { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .controls { margin-left: 0; width: 100%; }
+  #search { flex: 1; min-width: 140px; }
+  .mapwrap > .legend { position: static; max-width: none; box-shadow: none; margin: 0 max(12px, env(safe-area-inset-left, 0px)); }
+  .offmap { position: static; display: inline-flex; margin: 10px max(12px, env(safe-area-inset-left, 0px)) 14px; }
+}
+@media (max-width: 480px) { .cols2 { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <h1>{{t:Serbia · Parliamentary elections}}</h1>
+      <div class="brandrow">
+        <select id="lang" aria-label="{{t:Language}}"><!--LANGS--></select>
+        <button type="button" class="linkbtn" id="srcBtn" aria-haspopup="dialog">{{t:Sources}}</button>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="seg years" role="group" aria-label="{{t:Election}}" id="years"></div>
+      <div class="seg years" role="group" aria-label="{{t:Voters in Serbia or abroad}}" id="cats"></div>
+      <div class="seg" role="group" aria-label="{{t:Map view}}" id="modes"></div>
+      <input type="search" id="search" list="unitNames" placeholder="{{t:Search…}}" aria-label="{{t:Find municipality}}">
+      <datalist id="unitNames"></datalist>
+    </div>
+  </header>
+  <main>
+    <div class="mapwrap" id="mapwrap">
+      <svg id="map" role="img" aria-label="{{t:Map of results by municipality}}"></svg>
+      <div class="maptop" id="maptop">
+        <div class="seg sm levels" role="group" aria-label="{{t:Map level}}" id="levels"></div>
+        <select id="listSel" aria-label="{{t:List shown in the List share view}}" hidden></select>
+      </div>
+      <div class="zoom">
+        <button type="button" id="zin" aria-label="{{t:Zoom in}}">+</button>
+        <button type="button" id="zout" aria-label="{{t:Zoom out}}">−</button>
+        <button type="button" id="zreset" title="{{t:Show the whole map}}">{{t:All}}</button>
+        <div class="numctl" id="numctl" role="group" aria-label="{{t:Numbers on the map}}" hidden>
+          <button type="button" id="u-abs" data-unit="abs" title="{{t:Numbers: voters (thousands)}}">#</button>
+          <button type="button" id="u-pct" data-unit="pct" title="{{t:Numbers: turnout (%)}}">%</button>
+          <button type="button" id="znum" title="{{t:Show or hide the numbers on the map}}" aria-pressed="true"></button>
+        </div>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div class="offmap" id="offmap"><span class="cap">{{t:Show:}}</span><label class="opt" for="showPrisons"><input type="checkbox" id="showPrisons"> {{t:Prisons}}</label></div>
+      <div class="abroad" id="abroad" hidden></div>
+      <div class="azoom" id="azoom" hidden></div>
+      <div class="tip" id="tip" hidden></div>
+    </div>
+    <aside><div class="panel" id="panel"></div></aside>
+  </main>
+</div>
+<dialog id="sources" aria-labelledby="srcTitle">
+  <button type="button" class="x" id="srcClose" aria-label="{{t:Close}}">×</button>
+  <h2 id="srcTitle">{{t:Sources}}</h2>
+  <dl id="srcList"></dl>
+</dialog>
+
+<script>/*__D3__*/</script>
+<script>
+const D = /*__DATA__*/null;
+// Texts: English in the code, translations in D.i18n (built from i18n_sr-latn.json). {name} = value.
+const LANG = D.lang, T = D.i18n || {};
+const t = (s, v) => { let r = T[s] ?? s; if (v) for (const k in v) r = r.split('{' + k + '}').join(v[k]); return r; };
+const DEC = LANG === 'en' ? '.' : ',';
+const nf = (x, d) => x.toFixed(d).replace('.', DEC);
+// Polling stations with the right Serbian plural form
+const stations = n => LANG === 'en' ? `${n} station${n === 1 ? '' : 's'}`
+  : `${n} ${t(n % 10 === 1 && n % 100 !== 11 ? 'polling station (1)' : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? 'polling stations (2–4)' : 'polling stations (5+)')}`;
+const YEARS = Object.keys(D.E).sort();
+const Y0 = YEARS[0], Y1 = YEARS[YEARS.length - 1];
+const P0 = D.E[Y0].pair, P1 = D.E[Y1].pair;  // [main list, main challenger], 0-based, per election
+const fmt = n => n.toLocaleString(D.locale);
+const pct = (x, d = 1) => x == null || isNaN(x) ? '–' : nf(x * 100, d) + '%';
+const pp = (x, d = 1) => x == null || isNaN(x) ? '–' : (x > 0.0005 ? '+' : x < -0.0005 ? '−' : '±') + nf(Math.abs(x * 100), d);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const strip = m => m;  // municipality names come without 'Grad' / 'Gradska opština' from the build
+// A list's acronym (SNS, SPN, SL) where one is set in the build, otherwise "list N"
+const ab = (y, k) => D.E[y].lists[k].abbr || t('list {n}', { n: k + 1 });
+const Ab = (y, k) => D.E[y].lists[k].abbr || t('List {n}', { n: k + 1 });
+const sname = (y, k) => D.E[y].lists[k].abbr || D.E[y].lists[k].short;
+const lname = (y, k) => D.E[y].lists[k].abbr || `${k + 1}. ${D.E[y].lists[k].short}`;
+const partyOf = (y, k) => D.parties[D.E[y].lists[k].party] || D.parties.other;  // for the Other parties view
+const tag = (y, k) => D.E[y].lists[k].abbr || String(k + 1);  // short label: acronym or list number
+// People in thousands: 145, 12.3, 0.2; with sign: +10, −0.2
+const kfmt = (n, sign) => {
+  if (n == null || isNaN(n)) return '–';
+  const k = n / 1000, a = Math.abs(k), s = (a >= 10 ? a.toFixed(0) : a.toFixed(1)).replace(/\.0$/, '');
+  return (sign ? (k >= 0.05 ? '+' : k <= -0.05 ? '−' : '±') : '') + s.replace('.', DEC);
+};
+const sdiff = (x, y) => (y - x > 0 ? '+' : y - x < 0 ? '−' : '±') + fmt(Math.abs(y - x));
+
+// ---------- aggregate: one record per map unit and election ----------
+function blank(nl) { return { n: 0, rep: 0, reg: 0, regRep: 0, voted: 0, valid: 0, invalid: 0, votes: new Array(nl).fill(0), st: [] }; }
+function add(a, s) {
+  a.n++; a.reg += s[4];
+  if (s[8]) { a.rep++; a.regRep += s[4]; a.voted += s[5]; a.valid += s[6]; a.invalid += s[7]; s[9].forEach((v, k) => a.votes[k] += v); }
+}
+function derive(a, pair) {
+  a.turnout = a.regRep ? a.voted / a.regRep : null;
+  a.share = a.votes.map(v => a.valid ? v / a.valid : 0);
+  a.order = a.votes.map((_, k) => k).sort((x, y) => a.votes[y] - a.votes[x]);
+  a.lead = a.valid ? a.order[0] : -1;
+  a.margin = a.valid ? a.share[pair[1]] - a.share[pair[0]] : null;
+  a.other = -1; a.others = 0;  // strongest list apart from the compared pair, and the share of all other lists
+  if (a.valid) for (const k of a.order) if (!pair.includes(k)) { a.others += a.share[k]; if (a.other < 0 && a.votes[k] > 0) a.other = k; }
+  return a;
+}
+const U = D.units.map((u, i) => Object.assign({ i, y: {} }, u));
+const NAT = { name: t('Serbia'), district: t('All polling stations, including abroad and prisons'), nat: true, munis: [], y: {} };
+const ALL = [...U, NAT];
+for (const y of YEARS) {
+  const E = D.E[y];
+  for (const u of ALL) u.y[y] = blank(E.lists.length);
+  for (const s of E.stations) { add(U[s[0]].y[y], s); U[s[0]].y[y].st.push(s); add(NAT.y[y], s); }
+  for (const u of ALL) derive(u.y[y], E.pair);
+}
+// Change between the first and the last election
+const role = (lead, pair) => lead === pair[0] ? 'A' : lead === pair[1] ? 'B' : 'X';
+function setChange(u) {
+  const a = u.y[Y0], b = u.y[Y1], ok = !!(a.valid && b.valid);
+  const r = ok ? role(a.lead, P0) + role(b.lead, P1) : null;
+  u.ch = { ok, a, b, flip: !ok ? null : r.includes('X') ? 'X' : r,
+    swing: ok ? b.margin - a.margin : null,
+    shareA: ok ? b.share[P1[0]] - a.share[P0[0]] : null,
+    turnout: ok && a.turnout != null && b.turnout != null ? b.turnout - a.turnout : null,
+    voters: ok ? b.voted - a.voted : null,
+    others: ok ? b.others - a.others : null };
+}
+ALL.forEach(setChange);
+const SPECIAL = U.filter(u => u.key === 'abroad' || u.key === 'prisons');
+const ONMAP = U.filter(u => !SPECIAL.includes(u));
+const ABROAD = U.find(u => u.key === 'abroad');
+const SRB = { key: 'srb', name: t('Serbia'), district: t('Polling stations in Serbia (municipalities and prisons), without abroad'),
+  munis: [], y: {}, inland: true, lines: D.borders.country.Serbia };
+for (const y of YEARS) {
+  SRB.y[y] = blank(D.E[y].lists.length);
+  for (const u of [...ONMAP, U.find(x => x.key === 'prisons')]) for (const st of u.y[y].st) add(SRB.y[y], st);
+  derive(SRB.y[y], D.E[y].pair);
+}
+setChange(SRB);
+
+// ---------- abroad: one record per country, and one per polling station ----------
+const COUNTRY = {}, STN = {}, LOC = new Map();  // LOC: station row -> station record
+for (const y of YEARS) {
+  const E = D.E[y];
+  STN[y] = [];
+  E.stations.forEach((s, i) => {
+    const loc = E.loc[i];
+    if (!loc) return;
+    const [cc, city, lon, lat] = loc;
+    const c = COUNTRY[cc] || (COUNTRY[cc] = { key: 'c-' + cc, cc, name: D.countries[cc].name, en: D.countries[cc].en,
+      district: t('Abroad'), munis: [], y: {}, pts: {}, country: true });
+    const agg = blank(E.lists.length); add(agg, s); agg.st.push(s);
+    const p = { s, year: y, cc, city, lon, lat, y: { [y]: derive(agg, E.pair) }, ch: { ok: false } };
+    STN[y].push(p); (c.pts[y] = c.pts[y] || []).push(p); LOC.set(s, p);
+  });
+}
+const COUNTRIES = Object.values(COUNTRY);
+for (const c of COUNTRIES) {
+  for (const y of YEARS) {
+    c.pts[y] = c.pts[y] || [];
+    c.y[y] = blank(D.E[y].lists.length);
+    for (const p of c.pts[y]) { add(c.y[y], p.s); c.y[y].st.push(p.s); }
+    derive(c.y[y], D.E[y].pair);
+  }
+  setChange(c);
+}
+
+// ---------- prisons: one record per station number (the same institutions in every election) ----------
+const PRISON = {};
+for (const y of YEARS) {
+  const E = D.E[y];
+  E.stations.forEach((s, i) => {
+    const pl = E.ploc[i];
+    if (!pl) return;
+    const [city, address, lon, lat] = pl;
+    const p = PRISON[s[2]] || (PRISON[s[2]] = { key: 'p-' + s[2], prison: true, munis: [], y: {}, lon, lat,
+      district: t('Prison polling station {n} · {city}, {address}', { n: s[2], city, address }) });
+    p.name = `${s[3]} (${city})`;  // the latest name
+    const agg = blank(E.lists.length); add(agg, s); agg.st.push(s);
+    p.y[y] = derive(agg, E.pair);
+  });
+}
+const PRISONS = Object.values(PRISON);
+for (const p of PRISONS) {
+  for (const y of YEARS) if (!p.y[y]) p.y[y] = derive(blank(D.E[y].lists.length), D.E[y].pair);
+  setChange(p);
+}
+
+// ---------- colors ----------
+function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+let C = {};
+function readColors() {
+  for (const h of ['pa', 'pb', 'lx', 'vi']) C[h] = { mid: css('--' + h), lo: css('--' + h + '-lo'), hi: css('--' + h + '-hi') };
+  C.neutral = css('--neutral'); C.nodata = css('--nodata');
+  C.flip = { ab: css('--fl-ab'), bb: css('--fl-bb'), ba: css('--fl-ba') };
+}
+const hueOf = (y, k) => k === D.E[y].pair[0] ? 'pa' : k === D.E[y].pair[1] ? 'pb' : 'lx';
+// Colour scales: white at the middle (diverging) or at the low end (sequential), dark at the ends.
+// pa = SNS, blue; pb = SL / SPN, red; lx = lower turnout or fewer voters, green; yl = turnout, more voters, yellow.
+const GRAD = {
+  pa: ['#ffffff', '#4a8fd6', '#08306b'],
+  pb: ['#ffffff', '#e0533d', '#7f0000'],
+  lx: ['#ffffff', '#41ab5d', '#00441b'],
+  yl: ['#ffffff', '#f2c200', '#6b4f00'],
+  tl: ['#ffffff', '#26a69a', '#004d40'],  // other parties gained share
+  br: ['#ffffff', '#a1887f', '#3e2723'],  // other parties lost share
+};
+const ramp = (h, t) => d3.piecewise(d3.interpolateLab, GRAD[h])(Math.max(0, Math.min(1, t)));
+const seq = ramp, arm = ramp;
+const listColor = (y, k) => C[hueOf(y, k)].mid;
+const FLIPS = [
+  ['AA', () => C.pa.mid, `${Ab(Y0, P0[0])} (${Y0}) → ${ab(Y1, P1[0])} (${Y1})`],
+  ['BA', () => C.flip.ba, `${Ab(Y0, P0[1])} (${Y0}) → ${ab(Y1, P1[0])} (${Y1})`],
+  ['AB', () => C.flip.ab, `${Ab(Y0, P0[0])} (${Y0}) → ${ab(Y1, P1[1])} (${Y1})`],
+  ['BB', () => C.flip.bb, `${Ab(Y0, P0[1])} (${Y0}) → ${ab(Y1, P1[1])} (${Y1})`],
+  ['X', () => C.lx.mid, t('Other lists')],
+];
+let FLIPC = {};
+
+// ---------- state ----------
+let view = 'change', cat = 'serbia', level = 'municipality', ymode = 'winner', cmode = 'flip', selected = null, tableYear = Y1, showNums = true, showPrisons = false, tunit = 'pct';
+const listK = {}; YEARS.forEach(y => listK[y] = D.E[y].pair[1]);
+const STORE = 'izbori-map-v2';
+try {
+  const s = JSON.parse(localStorage.getItem(STORE) || '{}');
+  if (s.view === 'change' || YEARS.includes(s.view)) view = s.view;
+  if (s.ymode) ymode = s.ymode; if (s.cmode) cmode = s.cmode;
+  if (s.tunit === 'abs') tunit = 'abs';
+  if (s.listK) Object.assign(listK, s.listK);
+  if (cmode === 'voters') { cmode = 'turnout'; tunit = 'abs'; }  // saved by an older version
+  if (s.showNums === false) showNums = false;
+  if (s.showPrisons === true) showPrisons = true;
+  if (['abroad', 'region'].includes(s.cat)) cat = s.cat;
+  if (['municipality', 'district', 'region'].includes(s.level)) level = s.level;
+} catch (e) {}
+function save() { try { localStorage.setItem(STORE, JSON.stringify({ view, cat, level, ymode, cmode, listK, showNums, showPrisons, tunit })); } catch (e) {} }
+const isChange = () => view === 'change';
+const isAbroad = () => cat === 'abroad';
+const isRegion = () => cat === 'region';  // Serbia with the neighbouring countries
+// What the color scales are computed from: municipalities, or (abroad) polling stations per year and countries for change.
+const serbiaPop = () => level === 'municipality' ? ONMAP : GLIST[level];
+// Region map: Serbia and the neighbouring countries with results are one set of units for the color scales
+const regionPop = () => [SRB, ...D.region.filter(cc => COUNTRY[cc]).map(cc => COUNTRY[cc])];
+const popFor = y => isAbroad() ? STN[y] : isRegion() ? regionPop() : serbiaPop();
+const chPop = () => isAbroad() ? COUNTRIES : isRegion() ? regionPop() : serbiaPop();
+const MODES = {
+  year: [['winner', () => t('Winner')], ['margin', () => t('{a} vs {b}', { a: Ab(view, D.E[view].pair[0]), b: ab(view, D.E[view].pair[1]) })], ['others', () => t('Other parties')], ['share', () => t('List share')], ['turnout', () => t('Turnout')]],
+  change: [['flip', () => t('Winner')], ['swing', () => t('Lead swing')], ['others', () => t('Other parties')], ['shareA', () => t('{a} share', { a: Ab(Y1, P1[0]) })], ['turnout', () => t('Turnout')]],
+};
+// Views that write a number (voters, in thousands) on each municipality
+const numMode = () => isChange() ? cmode === 'turnout' : ymode === 'turnout';
+
+// ---------- scales per view ----------
+// Diverging bins around 0: at most 5 per side, step from `steps` (shares by default; pass counts for people).
+function divBins(vals, neg, pos, steps = [.02, .05, .1], tick = t => Math.round(Math.abs(t) * 100), q = .98) {
+  const abs = vals.filter(v => v != null).map(Math.abs).sort(d3.ascending);
+  const mx = Math.max(d3.quantile(abs, q) || steps[0], steps[0]);
+  const step = steps.find(s => mx / s <= 5) || steps[steps.length - 1];
+  const n = Math.max(1, Math.min(5, Math.ceil(mx / step - 1e-9)));
+  const th = d3.range(-(n - 1), n).map(i => i * step);
+  const cols = d3.range(n, 0, -1).map(i => arm(neg, i / n)).concat(d3.range(1, n + 1).map(i => arm(pos, i / n)));
+  return { th, cols, ticks: th.map(tick) };
+}
+const partialNote = () => YEARS.filter(y => NAT.y[y].rep < NAT.y[y].n)
+  .map(y => ' ' + t('{y} counts reported stations only ({rep} of {n}).', { y, rep: fmt(NAT.y[y].rep), n: fmt(NAT.y[y].n) })).join('');
+function binsFor() {
+  if (isChange()) {
+    const span = `${Y0} → ${Y1}`;
+    if (cmode === 'swing') return Object.assign(divBins(chPop().map(u => u.ch.swing), 'pa', 'pb'), { val: u => u.ch.swing,
+      title: t('Lead swing, {span}, points', { span }), ends: [t('Toward {a}', { a: ab(Y1, P1[0]) }), t('Toward the challenger')],
+      note: t('Lead = challenger share − {a} share. Challenger: {b0} in {y0}, {b1} in {y1}.', { a: ab(Y1, P1[0]), b0: ab(Y0, P0[1]), y0: Y0, b1: ab(Y1, P1[1]), y1: Y1 }) });
+    if (cmode === 'shareA') return Object.assign(divBins(chPop().map(u => u.ch.shareA), 'pb', 'pa'), { val: u => u.ch.shareA,
+      title: t('{a} share change, {span}, points', { a: Ab(Y1, P1[0]), span }), ends: [t('Lost share'), t('Gained share')],
+      note: `${Y0}: ${esc(D.E[Y0].lists[P0[0]].short)}. ${Y1}: ${esc(D.E[Y1].lists[P1[0]].short)}.` });
+    if (cmode === 'others') return Object.assign(divBins(chPop().map(u => u.ch.others), 'br', 'tl'), { val: u => u.ch.others,
+      title: t('Other parties: share change, {span}, points', { span }), ends: [t('Lost share'), t('Gained share')],
+      note: t('All lists except {a0} and {b0} in {y0}, {a1} and {b1} in {y1}.', { a0: ab(Y0, P0[0]), b0: ab(Y0, P0[1]), y0: Y0, a1: ab(Y1, P1[0]), b1: ab(Y1, P1[1]), y1: Y1 }) });
+    const onMap = !isAbroad() && !isRegion();
+    if (cmode === 'turnout' && tunit === 'abs') return Object.assign(divBins(chPop().map(u => u.ch.voters), 'lx', 'yl',
+      [500, 1000, 2000, 5000, 10000, 20000, 50000, 100000], t => kfmt(Math.abs(t)), .95), { val: u => u.ch.voters,
+      title: t('Turnout: change in number of voters, {span}, thousands', { span }), ends: [t('Fewer voters'), t('More voters')],
+      note: (onMap && showNums ? t('Numbers on the map: change in voters, in thousands.') : '') + partialNote() });
+    if (cmode === 'turnout') return Object.assign(divBins(chPop().filter(u => !u.kosovo).map(u => u.ch.turnout), 'lx', 'yl'), { val: u => u.ch.turnout,
+      title: t('Turnout change, {span}, points', { span }), ends: [t('Lower'), t('Higher')],
+      note: onMap && showNums ? t('Numbers on the map: change in points.') : '' });
+    return null;
+  }
+  const E = D.E[view], p = E.pair;
+  if (ymode === 'margin') {
+    const th = [-0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3, 0.4];
+    const cols = [1, .8, .6, .4, .2].map(t => arm('pa', t)).concat([.2, .4, .6, .8, 1].map(t => arm('pb', t)));
+    return { th, cols, val: u => u.y[view].margin, ticks: th.map(t => Math.round(Math.abs(t) * 100)),
+      ends: [t('{a} ahead', { a: Ab(view, p[0]) }), t('{a} ahead', { a: Ab(view, p[1]) })], title: t('Lead of {b} over {a}, points', { a: ab(view, p[0]), b: ab(view, p[1]) }) };
+  }
+  if (ymode === 'share') {
+    const k = listK[view];
+    const mx = d3.max(popFor(view), u => u.y[view].valid ? u.y[view].share[k] : 0) || 0.01;
+    const step = mx > .6 ? .1 : mx > .3 ? .05 : mx > .12 ? .02 : mx > .05 ? .01 : .005;
+    const top = Math.ceil(mx / step) * step, n = Math.round(top / step);
+    const th = d3.range(1, n).map(i => i * step);
+    const cols = d3.range(n).map(i => seq(hueOf(view, k), n === 1 ? .6 : .1 + .9 * i / (n - 1)));
+    const dec = step < .01 ? 1 : 0;
+    return { th, cols, val: u => u.y[view].valid ? u.y[view].share[k] : null, ticks: th.map(x => nf(x * 100, dec)),
+      ends: ['0%', nf(top * 100, dec) + '%'], title: t('Share of valid votes · {l}', { l: esc(lname(view, k)) }) };
+  }
+  if (ymode === 'turnout') {
+    // One scale for all elections, so the colors compare across years.
+    const vals = YEARS.flatMap(y => popFor(y).filter(u => !u.kosovo && u.y[y].turnout != null).map(u => u.y[y].turnout)).sort(d3.ascending);
+    const lo = Math.max(0, Math.floor(d3.quantile(vals, .02) * 20) / 20);
+    const hi = Math.min(1, Math.ceil(d3.quantile(vals, .98) * 20) / 20);
+    const th = d3.range(lo + .05, hi - .001, .05);
+    const cols = d3.range(th.length + 1).map(i => seq('yl', .1 + .9 * i / th.length));
+    return { th, cols, val: u => u.y[view].turnout, ticks: th.map(t => Math.round(t * 100)),
+      ends: ['<' + Math.round((lo + .05) * 100) + '%', '>' + Math.round((hi - .05) * 100) + '%'],
+      title: t('Turnout, % of registered voters'),
+      note: t('Same scale for {years}.', { years: YEARS.join(t(' and ')) }) + (showNums && !isAbroad() && !isRegion()
+        ? ' ' + (tunit === 'abs' ? t('Numbers on the map: voters, in thousands.') : t('Numbers on the map: turnout, %.')) : '') };
+  }
+  return null;
+}
+let B = null;
+const binColor = v => v == null || !B ? 'url(#hatch)' : B.cols[d3.bisectRight(B.th, v - 1e-12)];
+function fillOf(u) {
+  if (!u) return 'url(#hatch)';
+  if (isChange()) {
+    if (!u.ch.ok) return 'url(#hatch)';
+    return cmode === 'flip' ? FLIPC[u.ch.flip] : binColor(B && B.val(u));
+  }
+  const a = u.y[view];
+  if (!a.valid) return 'url(#hatch)';
+  if (ymode === 'others') return a.other >= 0 ? partyOf(view, a.other).color : 'url(#hatch)';
+  return ymode === 'winner' ? listColor(view, a.lead) : binColor(B && B.val(u));
+}
+
+// ---------- map ----------
+const svg = d3.select('#map');
+const defs = svg.append('defs');
+const pat = defs.append('pattern').attr('id', 'hatch').attr('patternUnits', 'userSpaceOnUse').attr('width', 5).attr('height', 5).attr('patternTransform', 'rotate(45)');
+const patBg = pat.append('rect').attr('width', 5).attr('height', 5);
+pat.append('line').attr('class', 'hatch-line').attr('x1', 0).attr('y1', 0).attr('x2', 0).attr('y2', 5);
+const g = svg.append('g');
+const feats = D.geo.features;
+feats.forEach(f => { f.unit = f.properties.u >= 0 ? U[f.properties.u] : null; if (f.unit) { f.unit.kosovo = !!f.properties.k; f.unit.feat = f; } });
+
+// ---------- districts and regions: groups of municipality shapes ----------
+const LEVELS = [['municipality', t('Municipalities')], ['district', t('Districts')], ['region', t('Regions')]];
+const GROUPS = { district: {}, region: {} };
+for (const f of feats) {
+  f.grp = {};
+  for (const [lv, prop] of [['district', 'd'], ['region', 'r']]) {
+    const k = f.properties[prop];
+    const gr = GROUPS[lv][k] || (GROUPS[lv][k] = { key: lv + ':' + k, name: k, level: lv, group: true, district: '',
+      members: [], feats: [], munis: [], y: {}, kosovo: true, lines: D.borders[lv][k] || [] });
+    gr.feats.push(f); f.grp[lv] = gr;
+    if (!f.properties.k) gr.kosovo = false;
+    if (f.unit) { gr.members.push(f.unit); gr.munis.push(f.unit.name); if (lv === 'district') gr.district = f.unit.region; }
+  }
+}
+const GLIST = { district: Object.values(GROUPS.district), region: Object.values(GROUPS.region) };
+GLIST.region.forEach(gr => { gr.district = t('Serbia'); });
+for (const gr of [...GLIST.district, ...GLIST.region]) {
+  for (const y of YEARS) {
+    gr.y[y] = blank(D.E[y].lists.length);
+    for (const u of gr.members) for (const s of u.y[y].st) { add(gr.y[y], s); gr.y[y].st.push(s); }
+    derive(gr.y[y], D.E[y].pair);
+  }
+  setChange(gr);
+}
+// What a municipality shape stands for at the current level
+const shapeUnit = f => isRegion() ? SRB : level === 'municipality' ? f.unit : f.grp[level];
+
+const projection = d3.geoMercator();
+const path = d3.geoPath(projection);
+// ---------- Region: Serbia with the neighbouring countries and their polling stations abroad ----------
+const REGION = D.region.filter(cc => D.countries[cc]);
+const regionFeats = REGION.map(cc => ({ type: 'Feature', cc, c: COUNTRY[cc] || null, geometry: D.countries[cc].geometry }));
+const REGION_FC = { type: 'FeatureCollection', features: [...D.geo.features, ...regionFeats] };
+const REGION_LABEL = { HU: [19.4, 47.1], RO: [24.9, 45.9], BG: [25.2, 42.75], MK: [21.7, 41.55], ME: [19.0, 42.62],
+  BA: [17.2, 43.85], HR: [15.7, 45.45], SI: [14.5, 46.5], AL: [20.05, 41.05] };  // label places inside each country
+const inRegion = c => !!c && REGION.includes(c.cc);
+const outline = u => !u ? null : u.feat ? path(u.feat) : u.group || u === SRB ? path({ type: 'MultiLineString', coordinates: u.lines })
+  : u.country && isRegion() && inRegion(u) ? path({ type: 'Feature', geometry: D.countries[u.cc].geometry }) : null;
+const paths = g.append('g').selectAll('path').data(feats).join('path')
+  .attr('class', f => 'unit' + (f.unit ? '' : ' empty'));
+const borderPath = g.append('path').attr('class', 'gborder');
+const hovPath = g.append('path').attr('class', 'hov');
+const selPath = g.append('path').attr('class', 'sel');
+const regionG = g.insert('g', ':first-child');  // neighbouring countries, under Serbia
+const prisonG = g.append('g');
+const labels = g.append('g');
+let W = 0, H = 0, curK = 1;
+
+function layout() {
+  const box = document.getElementById('map').getBoundingClientRect();
+  if (box.height < 50) return;  // map hidden (Abroad view on a phone)
+  W = box.width; H = box.height;
+  svg.attr('viewBox', `0 0 ${W} ${H}`);
+  const pad = Math.min(40, W * .06);
+  projection.fitExtent([[pad, pad + (W < 860 ? 36 : 0)], [W - pad, H - pad]], isRegion() ? REGION_FC : D.geo);  // phone: room for the level switch
+  paths.attr('d', path);
+  selPath.attr('d', outline(selected));
+  feats.forEach(f => { f.b = path.bounds(f); f.bw = f.b[1][0] - f.b[0][0]; f.bh = f.b[1][1] - f.b[0][1]; f.c = path.centroid(f); f.area = path.area(f); });
+  for (const gr of [...GLIST.district, ...GLIST.region]) {
+    let A = 0, cx = 0, cy = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const f of gr.feats) {
+      A += f.area; cx += f.c[0] * f.area; cy += f.c[1] * f.area;
+      x0 = Math.min(x0, f.b[0][0]); y0 = Math.min(y0, f.b[0][1]); x1 = Math.max(x1, f.b[1][0]); y1 = Math.max(y1, f.b[1][1]);
+    }
+    gr.c = [cx / A, cy / A]; gr.bw = x1 - x0; gr.bh = y1 - y0;
+  }
+  drawBorders();
+  drawPrisons();
+  drawRegion();
+  drawLabels();
+  zoom.translateExtent([[-W, -H], [2 * W, 2 * H]]);
+}
+// District and region borders (none at municipality level)
+function drawBorders() {
+  borderPath.attr('d', isRegion() ? path({ type: 'MultiLineString', coordinates: SRB.lines })
+    : level === 'municipality' ? null : path({ type: 'MultiLineString', coordinates: GLIST[level].flatMap(gr => gr.lines) }));
+}
+// One label place per municipality, district or region: its centre and size on screen
+function labelItems() {
+  if (isRegion()) return [];  // the Region map shows Serbia as one unit, without labels
+  return level === 'municipality' ? feats.filter(f => f.unit).map(f => ({ u: f.unit, c: f.c, bw: f.bw, bh: f.bh }))
+    : GLIST[level].map(gr => ({ u: gr, c: gr.c, bw: gr.bw, bh: gr.bh }));
+}
+function drawLabels() {
+  const items = labelItems();
+  let data = [], text = () => '', nums = false;
+  if (numMode() && showNums) {
+    nums = true;
+    data = isChange() ? items.filter(it => it.u.ch.ok) : items.filter(it => it.u.y[view].valid);
+    text = !isChange() ? (tunit === 'abs' ? it => kfmt(it.u.y[view].voted) : it => Math.round(it.u.y[view].turnout * 100) + '%')
+      : tunit === 'abs' ? it => kfmt(it.u.ch.voters, true) : it => pp(it.u.ch.turnout);
+  } else if (!isChange() && ymode === 'winner') {
+    const p = D.E[view].pair;
+    data = items.filter(it => it.u.y[view].valid && !p.includes(it.u.y[view].lead));
+    text = it => it.u.y[view].lead + 1;
+  } else if (isChange() && cmode === 'flip') {
+    data = items.filter(it => it.u.ch.flip === 'X');
+    text = it => `${it.u.ch.a.lead + 1}→${it.u.ch.b.lead + 1}`;
+  }
+  labels.selectAll('text').data(data).join('text').attr('class', 'lbl')
+    .attr('transform', it => `translate(${it.c})`).text(text).classed('num', nums)
+    .style('font-size', 11 / curK + 'px').style('stroke-width', 3 / curK + 'px');
+  cull();
+}
+// Hide number labels that do not fit inside their shape at the current zoom.
+function cull() {
+  labels.selectAll('text.num').attr('display', function (it) {
+    return it.bw * curK >= this.textContent.length * 6.4 + 2 && it.bh * curK >= 11 ? null : 'none';
+  });
+}
+// Prison polling stations as dots at their address; stations at the same address sit in a small spiral.
+const PRISON_POS = new Map();
+{
+  const seen = new Map();
+  for (const p of PRISONS) {
+    const k = p.lon + ',' + p.lat, i = seen.get(k) || 0;
+    seen.set(k, i + 1);
+    PRISON_POS.set(p, [4.8 * Math.sqrt(i) * Math.cos(i * 2.39996), 4.8 * Math.sqrt(i) * Math.sin(i * 2.39996)]);
+  }
+}
+function drawPrisons() {
+  if (!C.pa) return;  // colors and scales are not ready before the first paint(); paint() draws the dots
+  prisonG.selectAll('circle').data(showPrisons && !isRegion() ? PRISONS : []).join('circle').attr('class', 'prison')
+    .attr('cx', p => projection([p.lon, p.lat])[0] + PRISON_POS.get(p)[0] / curK)
+    .attr('cy', p => projection([p.lon, p.lat])[1] + PRISON_POS.get(p)[1] / curK)
+    .attr('r', 4.2 / curK)
+    .attr('fill', p => { const f = fillOf(p); return !f || f.startsWith('url') ? C.nodata || 'none' : f; })  // colors are set by paint()
+    .classed('on', p => p === selected)
+    .on('pointermove', (e, p) => { if (e.pointerType !== 'touch') { e.stopPropagation(); hovPath.attr('d', null); showTip(e, tipHtml(p)); } })
+    .on('pointerleave', () => { tip.hidden = true; })
+    .on('click', (e, p) => { e.stopPropagation(); select(p); });
+}
+function drawRegion() {
+  const on = isRegion() && !!C.pa;  // colours are ready after the first paint()
+  regionG.selectAll('path.rland').data(on ? regionFeats : []).join('path')
+    .attr('class', f => 'rland' + (f.c ? '' : ' ctx')).attr('d', path)
+    .attr('fill', f => f.c ? fillOf(f.c) : 'var(--land)')
+    .on('pointermove', (e, f) => {
+      if (e.pointerType === 'touch') return;
+      showTip(e, f.c ? tipHtml(f.c) : `<b>${esc(D.countries[f.cc].name)}</b><div class="sub">${t('No polling stations')}</div>`);
+      hovPath.attr('d', f.c ? path(f) : null);
+    })
+    .on('pointerleave', () => { tip.hidden = true; hovPath.attr('d', null); })
+    .on('click', (e, f) => { if (f.c) select(f.c); });
+  regionG.selectAll('text.rname').data(on ? regionFeats : []).join('text').attr('class', 'rname')
+    .text(f => D.countries[f.cc].name)
+    .attr('x', f => projection(REGION_LABEL[f.cc] || d3.geoCentroid(f))[0])
+    .attr('y', f => projection(REGION_LABEL[f.cc] || d3.geoCentroid(f))[1])
+    .style('font-size', 11 / curK + 'px').style('stroke-width', 3 / curK + 'px');
+}
+const zoom = d3.zoom().scaleExtent([1, 40]).on('zoom', e => {
+  g.attr('transform', e.transform); curK = e.transform.k;
+  labels.selectAll('text').style('font-size', 11 / curK + 'px').style('stroke-width', 3 / curK + 'px');
+  cull();
+  regionG.selectAll('text.rname').style('font-size', 11 / curK + 'px').style('stroke-width', 3 / curK + 'px');
+  prisonG.selectAll('circle').attr('r', 4.2 / curK)
+    .attr('cx', p => projection([p.lon, p.lat])[0] + PRISON_POS.get(p)[0] / curK)
+    .attr('cy', p => projection([p.lon, p.lat])[1] + PRISON_POS.get(p)[1] / curK);
+});
+svg.call(zoom).on('dblclick.zoom', null);
+const motion = () => matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1;
+function zoomTo(features, maxK = 12) {
+  const [[x0, y0], [x1, y1]] = path.bounds({ type: 'FeatureCollection', features });
+  const k = Math.min(maxK, 0.8 / Math.max((x1 - x0) / W, (y1 - y0) / H));
+  svg.transition().duration(600 * motion())
+    .call(zoom.transform, d3.zoomIdentity.translate(W / 2, H / 2).scale(k).translate(-(x0 + x1) / 2, -(y0 + y1) / 2));
+}
+document.getElementById('zin').onclick = () => svg.transition().duration(250 * motion()).call(zoom.scaleBy, 1.6);
+document.getElementById('zout').onclick = () => svg.transition().duration(250 * motion()).call(zoom.scaleBy, 1 / 1.6);
+document.getElementById('zreset').onclick = () => svg.transition().duration(400 * motion()).call(zoom.transform, d3.zoomIdentity);
+document.getElementById('znum').onclick = () => { showNums = !showNums; save(); paint(); };
+document.querySelectorAll('#numctl [data-unit]').forEach(b => b.onclick = () => { tunit = b.dataset.unit; save(); paint(); });
+const EYE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7c2 0 3.8.7 5.3 1.7M22 12s-3.6 7-10 7c-2 0-3.8-.7-5.3-1.7"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M3 3l18 18"/></svg>';
+
+// ---------- tooltip ----------
+const tip = document.getElementById('tip');
+const chip = (y, k) => k < 0 ? '–' : `<span class="chip" style="background:${listColor(y, k)}">${k + 1}</span>`;
+const sv = (a, k) => a.valid ? pct(a.share[k]) : '–';
+const sv1 = (x, a) => a.valid ? pct(x) : '–';
+function tipHtml(u, name) {
+  if (!u) return `<b>${esc(name)}</b><div class="sub">${t('No polling stations in either election')}</div>`;
+  const sub = esc(u.district) + (u.munis.length > 1 ? ' · ' + t('includes {n} municipalities', { n: u.munis.length }) : '');
+  if (isChange()) {
+    const { a, b } = u.ch;
+    const row = (l, x, y, d) => `<span>${l}</span><span class="r">${x}</span><span class="r">${y}</span><span class="r">${d}</span>`;
+    const pend = b.rep < b.n ? `<div style="margin-top:6px;color:var(--muted)">${t('{y}: {rep} of {n} stations reported', { y: Y1, rep: b.rep, n: b.n })}</div>` : '';
+    return `<b>${esc(u.name)}</b><div class="sub">${sub}</div><div class="cmp">
+      <span></span><span class="h">${Y0}</span><span class="h">${Y1}</span><span class="h">Δ</span>
+      ${row(t('Leading list'), chip(Y0, a.lead), chip(Y1, b.lead), '')}
+      ${row(`${Ab(Y0, P0[0])} / ${ab(Y1, P1[0])}`, sv(a, P0[0]), sv(b, P1[0]), pp(u.ch.shareA))}
+      ${row(t('Challenger, {a} / {b}', { a: ab(Y0, P0[1]), b: ab(Y1, P1[1]) }), sv(a, P0[1]), sv(b, P1[1]), '')}
+      ${row(t('Challenger lead'), pp(a.margin), pp(b.margin), pp(u.ch.swing))}
+      ${row(t('Turnout, pts'), pct(a.turnout), pct(b.turnout), pp(u.ch.turnout))}
+      ${row(t('Voters, thousands'), kfmt(a.voted), kfmt(b.voted), kfmt(u.ch.voters, true))}
+      ${row(t('Other parties'), sv1(a.others, a), sv1(b.others, b), pp(u.ch.others))}</div>${pend}`;
+  }
+  const a = u.y[view];
+  if (!a.valid) return `<b>${esc(u.name)}</b><div class="sub">${sub}</div>${t('No results in {y}', { y: view })}${a.n ? ' ' + t('({n} stations not reported)', { n: a.n }) : ''}`;
+  const rows = a.order.slice(0, 3).map(k => `<span class="sw" style="background:${listColor(view, k)}"></span><span>${esc(lname(view, k))}</span><span class="r">${pct(a.share[k])}</span>`).join('');
+  const p = D.E[view].pair;
+  let extra = '';
+  if (ymode === 'margin') extra = `<div style="margin-top:6px">${t('Lead of {b} over {a}:', { a: ab(view, p[0]), b: ab(view, p[1]) })} <b style="display:inline">${pp(a.margin)} ${t('pts')}</b></div>`;
+  if (ymode === 'others' && a.other >= 0) extra = `<div style="margin-top:6px">${t('Strongest other party:')} <b style="display:inline">${esc(partyOf(view, a.other).name)}</b>, ${pct(a.share[a.other])}. ${t('All other parties:')} ${pct(a.others)}.</div>`;
+  if (ymode === 'share' && !a.order.slice(0, 3).includes(listK[view])) extra = `<div style="margin-top:6px">${esc(lname(view, listK[view]))}: <b style="display:inline">${pct(a.share[listK[view]], 2)}</b></div>`;
+  const pend = a.rep < a.n ? ' · ' + t('{rep} of {n} stations reported', { rep: a.rep, n: a.n }) : '';
+  return `<b>${esc(u.name)}</b><div class="sub">${sub}</div><div class="kv">${rows}</div>${extra}<div style="margin-top:6px;color:var(--ink-2)">${t('Turnout {p} · {v} voters', { p: pct(a.turnout), v: fmt(a.voted) })}${pend}</div>`;
+}
+function showTip(e, html) {
+  tip.innerHTML = html; tip.hidden = false;
+  const box = document.getElementById('mapwrap').getBoundingClientRect();
+  const x = e.clientX - box.left, y = e.clientY - box.top, tw = tip.offsetWidth, th = tip.offsetHeight;
+  tip.style.left = Math.max(8, x + 14 + tw > W ? x - tw - 14 : x + 14) + 'px';
+  tip.style.top = Math.max(8, Math.min(H - th - 8, y + 14)) + 'px';
+}
+paths.on('pointermove', (e, f) => {
+  if (e.pointerType === 'touch') return;
+  const u = shapeUnit(f);
+  showTip(e, tipHtml(u, f.properties.name));
+  hovPath.attr('d', level === 'municipality' ? null : outline(u));
+})
+  .on('pointerleave', () => { tip.hidden = true; hovPath.attr('d', null); })
+  .on('click', (e, f) => { const u = shapeUnit(f); if (u) select(u); });
+
+// ---------- legend & off-map ----------
+function legendHtml() {
+  const nd = `<div class="row"><span class="sw nd"></span>${isChange() ? t('No results in one of the years') : t('No results')}</div>`;
+  // Abroad: what the dots and the country colors show
+  const prisonDot = `<div class="rows"><div class="row"><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4.4" fill="var(--nodata)" stroke="var(--ink)" stroke-width="1.4"/></svg>${t('Polling station in a prison ({n})', { n: PRISONS.length })}</div></div>`;
+  const regionDots = !isRegion() ? '' : isChange()
+    ? `<p class="lnote">${t('Serbia (without voters abroad) and each neighbouring country are colored by their change.')}</p>`
+    : `<p class="lnote">${t('Serbia (without voters abroad) and each neighbouring country are colored by their total.')}</p>`;
+  const dots = !isAbroad() ? (showPrisons && !isRegion() ? prisonDot : '') + regionDots : isChange()
+    ? `<div class="rows"><h3>${t('Polling stations')}</h3><div class="row"><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4" fill="none" stroke="var(--ink-2)" stroke-width="1.3"/></svg>${Y0}</div>
+       <div class="row"><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4.5" fill="var(--ink)"/></svg>${Y1}</div></div>`
+    : `<p class="lnote">${t('Each dot is one polling station, at its city. The value next to each country is for the whole country.')}</p>`;
+  const scope = isAbroad() ? (isChange() ? t(', countries') : t(', polling stations')) : '';
+  if (isChange() && cmode === 'flip') {
+    const counts = d3.rollup(chPop().filter(u => u.ch.ok), v => v.length, u => u.ch.flip);
+    return `<div><h3>${t('Leading list, {span}', { span: `${Y0} → ${Y1}` })}${scope}</h3><div class="rows">${FLIPS.map(([k, , label]) =>
+      `<div class="row"><span class="sw" style="background:${FLIPC[k]}"></span>${esc(label)}<span class="cnt">${counts.get(k) || 0}</span></div>`).join('')}${nd}</div></div>${dots}`;
+  }
+  if (!isChange() && ymode === 'others') {
+    const p = D.E[view].pair;
+    const counts = d3.rollup(popFor(view).filter(u => u.y[view].valid && u.y[view].other >= 0), v => v.length, u => D.E[view].lists[u.y[view].other].party);
+    const rows = [...counts].sort((x, y) => y[1] - x[1]).map(([key, n]) => { const pt = D.parties[key] || D.parties.other;
+      return `<div class="row"><span class="sw" style="background:${pt.color}"></span>${esc(pt.name)}<span class="cnt">${n}</span></div>`; }).join('');
+    return `<div><h3>${t('Strongest other party, {y}', { y: view })}${scope}</h3><div class="rows">${rows}${nd}</div>
+      <p class="lnote">${t('The strongest list apart from {a} and {b}. Same color for the same party in {years}.', { a: ab(view, p[0]), b: ab(view, p[1]), years: YEARS.join(t(' and ')) })}</p></div>${dots}`;
+  }
+  if (!isChange() && ymode === 'winner') {
+    const p = D.E[view].pair;
+    return `<div><h3>${t('Leading list, {span}', { span: view })}${scope}</h3><div class="rows">
+      <div class="row"><span class="sw" style="background:${listColor(view, p[0])}"></span>${esc(lname(view, p[0]))}</div>
+      <div class="row"><span class="sw" style="background:${listColor(view, p[1])}"></span>${esc(lname(view, p[1]))}</div>
+      <div class="row"><span class="sw" style="background:${C.lx.mid}"></span>${t('Other lists')}</div>${nd}</div></div>${dots}`;
+  }
+  return `<div><h3>${B.title}${scope}</h3><div class="bins">${B.cols.map(c => `<span style="background:${c}"></span>`).join('')}</div>
+    <div class="ticks num">${B.ticks.map((t, i) => `<span style="left:${(i + 1) * 31 - .5}px">${t}</span>`).join('')}</div>
+    <div class="ends"><span>${B.ends[0]}</span><span>${B.ends[1]}</span></div>
+    <div class="rows" style="margin-top:6px">${nd}</div></div>${B.note ? `<p class="lnote">${B.note}</p>` : ''}${dots}`;
+}
+// Show: [ ] Prisons. Hiding the dots also closes a selected prison station.
+const prisonBox = document.getElementById('showPrisons');
+prisonBox.onchange = () => {
+  showPrisons = prisonBox.checked;
+  if (!showPrisons && selected && selected.prison) select(null);
+  save(); paint();
+};
+function offVal(u) {
+  if (isChange()) {
+    if (!u.ch.ok) return '–';
+    if (cmode === 'flip') return `${tag(Y0, u.ch.a.lead)}→${tag(Y1, u.ch.b.lead)}`;
+    if (cmode === 'turnout' && tunit === 'abs') return kfmt(u.ch.voters, true) + t('k');
+    return pp(cmode === 'swing' ? u.ch.swing : cmode === 'shareA' ? u.ch.shareA : cmode === 'others' ? u.ch.others : u.ch.turnout) + ' ' + t('pts');
+  }
+  const a = u.y[view];
+  if (!a.valid) return '–';
+  if (ymode === 'others') return a.other >= 0 ? `${a.other + 1}. ${pct(a.share[a.other])}` : '–';
+  return ymode === 'winner' ? `${D.E[view].lists[a.lead].abbr || (a.lead + 1) + '.'} ${pct(a.share[a.lead])}` : ymode === 'margin' ? pp(a.margin) + ' ' + t('pts') : ymode === 'share' ? pct(a.share[listK[view]]) : `${pct(a.turnout)} · ${kfmt(a.voted)}${t('k')}`;
+}
+function renderOffmap() {
+  prisonBox.checked = showPrisons;
+}
+
+// ---------- panel ----------
+let showAll = {}, sortKey = 'bm', sortDir = 1;
+function statsHtml(a) {
+  return `<dl class="stats">
+    <div><dt>${t('Turnout')}</dt><dd>${pct(a.turnout)}</dd></div>
+    <div><dt>${t('Voted')}</dt><dd>${fmt(a.voted)}</dd></div>
+    <div><dt>${t('Registered')}</dt><dd>${fmt(a.reg)}</dd></div>
+    <div><dt>${t('Valid votes')}</dt><dd>${fmt(a.valid)}</dd></div>
+    <div><dt>${t('Invalid ballots')}</dt><dd>${fmt(a.invalid)} <small>${pct(a.voted ? a.invalid / a.voted : null)}</small></dd></div>
+    <div><dt>${t('Stations reported')}</dt><dd>${fmt(a.rep)} <small>${t('of {n}', { n: fmt(a.n) })}</small></dd></div>
+  </dl>`;
+}
+function barsHtml(a, y, nat, compact) {
+  const key = y + (compact ? 'c' : '');
+  const ks = a.order.filter(k => nat || a.votes[k] > 0);
+  const lim = compact ? 5 : 6;
+  const shown = showAll[key] || ks.length <= lim + 2 ? ks : ks.slice(0, lim);
+  const mx = Math.max(a.share[a.order[0]], .03);
+  const thr = nat ? `<span class="thr" style="left:${3 / (mx * 100) * 100}%" title="${t('3% threshold')}"></span>` : '';
+  const rows = shown.map(k => `<div class="bar" title="${esc(D.E[y].lists[k].full)}">
+      <span class="no">${k + 1}</span><span class="nm">${esc(sname(y, k))}</span><span class="pc">${pct(a.share[k], compact ? 1 : 2)}</span>
+      <span></span><span class="track"><span class="fill" style="width:${a.share[k] / mx * 100}%;background:${listColor(y, k)}"></span>${thr}</span>
+      ${compact ? '' : `<span></span><span class="vv">${t('{n} votes', { n: fmt(a.votes[k]) })}</span>`}</div>`).join('');
+  const more = ks.length > shown.length ? `<button type="button" class="more" data-more="${key}">${t('Show all {n} lists', { n: ks.length })}</button>` : '';
+  return `<div class="bars">${rows}</div>${more}`;
+}
+function compareHtml(u) {
+  const { a, b } = u.ch;
+  const r = (l, x, y, d) => `<tr><td>${l}</td><td class="num">${x}</td><td class="num">${y}</td><td class="num">${d}</td></tr>`;
+  const sw = h => `<span class="sw" style="background:${C[h].mid}"></span>`;
+  const dReg = a.reg && b.reg ? (b.reg - a.reg > 0 ? '+' : b.reg - a.reg < 0 ? '−' : '±') + fmt(Math.abs(b.reg - a.reg)) : '–';
+  const pts = ' ' + t('pts');
+  return `<section class="sec"><h4>${t('{y0} compared with {y1}', { y0: Y0, y1: Y1 })}</h4><div class="tbl"><table class="cmpt">
+    <thead><tr><th></th><th>${Y0}</th><th>${Y1}</th><th>${t('Change')}</th></tr></thead><tbody>
+    ${r(t('Leading list'), chip(Y0, a.lead), chip(Y1, b.lead), '')}
+    ${r(`${sw('pa')}${Ab(Y0, P0[0])} / ${ab(Y1, P1[0])}`, sv(a, P0[0]), sv(b, P1[0]), pp(u.ch.shareA) + pts)}
+    ${r(`${sw('pb')}${t('Challenger: {a} / {b}', { a: ab(Y0, P0[1]), b: ab(Y1, P1[1]) })}`, sv(a, P0[1]), sv(b, P1[1]), '')}
+    ${r(t('Challenger lead'), a.valid ? pp(a.margin) : '–', b.valid ? pp(b.margin) : '–', pp(u.ch.swing) + pts)}
+    ${r(t('Turnout'), pct(a.turnout), pct(b.turnout), pp(u.ch.turnout) + pts)}
+    ${r(t('Other parties'), sv1(a.others, a), sv1(b.others, b), pp(u.ch.others) + pts)}
+    ${r(t('Voters'), fmt(a.voted), fmt(b.voted), a.valid && b.valid ? sdiff(a.voted, b.voted) : '–')}
+    ${r(t('Registered voters'), fmt(a.reg), fmt(b.reg), dReg)}
+    ${r(t('Invalid ballots'), pct(a.voted ? a.invalid / a.voted : null), pct(b.voted ? b.invalid / b.voted : null), a.voted && b.voted ? pp(b.invalid / b.voted - a.invalid / a.voted) + pts : '–')}
+    </tbody></table></div>${b.rep < b.n ? `<p class="note" style="margin-top:6px">${t('{y}: {rep} of {n} stations reported.', { y: Y1, rep: fmt(b.rep), n: fmt(b.n) })}</p>` : ''}</section>`;
+}
+function stationRows(u, y) {
+  const a = u.y[y], p = D.E[y].pair;
+  const v = s => ({ bm: s[2], name: s[3], to: s[8] && s[4] ? s[5] / s[4] : -1, pa: s[8] && s[6] ? s[9][p[0]] / s[6] : -1, pb: s[8] && s[6] ? s[9][p[1]] / s[6] : -1, reg: s[4] })[sortKey];
+  const st = a.st.slice().sort((x, z) => { const m = v(x), n = v(z); return (m < n ? -1 : m > n ? 1 : 0) * sortDir || x[2] - z[2]; });
+  const link = (l, label, title) => l ? `<a href="${esc(l.startsWith('http') ? l : D.pdfPrefix + l)}" target="_blank" rel="noopener" title="${title}">${label}</a>` : '';
+  return st.map(s => {
+    const where = LOC.get(s) ? esc(LOC.get(s).city) + (u.country ? '' : ', ' + esc(COUNTRY[LOC.get(s).cc].name)) : u.munis.length > 1 ? esc(D.E[y].munis[s[1]]) : '';
+    const multi = where ? `<br><span style="color:var(--muted)">${where}</span>` : '';
+    const doc = link(s[10], 'PDF', t('Polling board record (form RG-2), PDF')) + (s[11] ? ' ' + link(s[11], t('fix'), t('Correction decision, PDF')) : '');
+    if (!s[8]) return `<tr><td class="num">${s[2]}</td><td>${esc(s[3])}${multi}</td><td class="num">${fmt(s[4])}</td><td class="pending" colspan="4">${t('not reported')}</td><td>${doc}</td></tr>`;
+    const lead = s[9].indexOf(Math.max(...s[9]));
+    return `<tr><td class="num">${s[2]}</td><td>${esc(s[3])}${multi}</td><td class="num">${fmt(s[4])}</td><td class="num">${pct(s[4] ? s[5] / s[4] : null)}</td>
+      <td class="num">${pct(s[6] ? s[9][p[0]] / s[6] : null)}</td><td class="num">${pct(s[6] ? s[9][p[1]] / s[6] : null)}</td>
+      <td>${chip(y, lead)}</td><td>${doc}</td></tr>`;
+  }).join('');
+}
+function tableHtml(u, y, withToggle) {
+  const p = D.E[y].pair;
+  const th = (k, l, t) => `<th data-k="${k}" ${t ? `title="${esc(t)}"` : ''} ${sortKey === k ? `aria-sort="${sortDir > 0 ? 'ascending' : 'descending'}"` : ''}>${l}</th>`;
+  const toggle = withToggle ? `<span class="seg sm" role="group" aria-label="${t('Election for the polling station table')}">${YEARS.map(z =>
+    `<button type="button" id="ty-${z}" data-ty="${z}" aria-pressed="${z === y}">${z}</button>`).join('')}</span>` : '';
+  return `<section class="sec"><h4>${t('Polling stations, {y}', { y })} ${toggle}</h4><p class="note" style="margin:-2px 0 8px">${stations(u.y[y].n)} · ${t('click a heading to sort. Station numbers can differ between elections.')}</p><div class="tbl"><table class="st">
+    <thead><tr>${th('bm', t('PS'), t('Polling station number'))}${th('name', t('Polling station'))}${th('reg', t('Reg.'), t('Registered voters'))}${th('to', t('Turnout'))}${th('pa', D.E[y].lists[p[0]].abbr || 'L' + (p[0] + 1), lname(y, p[0]))}${th('pb', D.E[y].lists[p[1]].abbr || 'L' + (p[1] + 1), lname(y, p[1]))}<th>${t('Lead')}</th><th>${t('Record')}</th></tr></thead>
+    <tbody>${stationRows(u, y)}</tbody></table></div></section>`;
+}
+function renderPanel() {
+  const home = isAbroad() ? ABROAD : isRegion() ? SRB : NAT;  // what the panel shows when nothing is selected
+  const u = selected || home;
+  const el = document.getElementById('panel');
+  const eyebrow = t(u.nat ? 'Whole country' : u === ABROAD ? 'All countries' : u.country ? 'Country' : u === SRB ? 'Country' : u.group ? (u.level === 'district' ? 'District' : 'Region') : u.prison ? 'Prison' : u.key === 'prisons' ? 'Not on the map' : (u.city || u.munis.length > 1 ? 'City' : 'Municipality'));
+  const meta = u.nat ? esc(u.district) : u === ABROAD ? t('{n} countries', { n: COUNTRIES.filter(c => c.y[isChange() ? Y1 : view].n).length })
+    : u.group ? `${esc(u.district)} · ${t('{n} municipalities', { n: u.members.length })}` : esc(u.district) + (u.munis.length > 1 ? '<br>' + t('Includes {list}', { list: u.munis.map(m => esc(strip(m))).join(', ') }) : '');
+  let body;
+  if (isChange()) {
+    const { a, b } = u.ch;
+    body = compareHtml(u) + `<section class="sec"><h4>${t('Votes by list')}</h4><div class="cols2">
+        <div><h4>${Y0}</h4>${a.valid ? barsHtml(a, Y0, u.nat, true) : `<p class="note">${t('No results.')}</p>`}</div>
+        <div><h4>${Y1}</h4>${b.valid ? barsHtml(b, Y1, u.nat, true) : `<p class="note">${t('No results.')}</p>`}</div></div></section>`
+      + (u.nat || u === SRB ? '' : tableHtml(u, tableYear, true));
+  } else {
+    const a = u.y[view];
+    body = statsHtml(a) + (a.valid ? `<section class="sec"><h4>${t('Votes by list, {y}', { y: view })} ${u.nat ? `<span>${t('dashed line: 3% threshold')}</span>` : ''}</h4>${barsHtml(a, view, u.nat, false)}</section>`
+      : `<p class="note">${t('No results in {y}.', { y: view })}</p>`) + (u.nat || u === SRB || !a.n ? '' : tableHtml(u, view, false));
+  }
+  el.innerHTML = `<div class="ptop"><div><div class="eyebrow">${eyebrow} · ${isChange() ? `${Y0} → ${Y1}` : view}</div><h2>${esc(u.name)}</h2><div class="meta">${meta}</div></div>
+      ${u === home ? '' : `<button type="button" class="close" id="close">${t(isAbroad() ? 'All countries' : isRegion() ? 'Serbia' : 'Whole country')}</button>`}</div>
+    ${body}
+    ${u.nat ? `<p class="note">${t('Click a municipality on the map, or find it by name, to see its results and every polling station.')}</p>` : ''}
+    ${u === ABROAD && isAbroad() ? `<p class="note">${t('Click a country to see its results and polling stations.')}</p>` : ''}`;
+  const c = document.getElementById('close'); if (c) c.onclick = () => select(null);
+  el.querySelectorAll('[data-more]').forEach(m => m.onclick = () => { showAll[m.dataset.more] = true; renderPanel(); });
+  el.querySelectorAll('[data-ty]').forEach(t => t.onclick = () => { tableYear = t.dataset.ty; sortKey = 'bm'; sortDir = 1; renderPanel(); });
+  el.querySelectorAll('th[data-k]').forEach(h => h.onclick = () => {
+    const k = h.dataset.k; if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = k === 'bm' || k === 'name' ? 1 : -1; }
+    renderPanel();
+  });
+}
+
+function select(u) {
+  selected = u; showAll = {}; sortKey = 'bm'; sortDir = 1;
+  selPath.attr('d', outline(u));
+  renderPanel(); renderOffmap(); drawPrisons();
+  if (isAbroad()) renderAbroad(legendHtml());
+  if (u && (u.feat || u.group || u.country) && W < 860) document.querySelector('aside').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  else document.querySelector('aside').scrollTop = 0;
+}
+
+// ---------- controls ----------
+document.getElementById('lang').onchange = e => { location.href = e.target.value; };  // other language version
+
+// Sources dialog. Names of sources and products are placeholders, so they keep their own spelling in every script.
+const REPO = 'https://github.com/prototipi/Mapa-SRB-izbora';
+const ext = (href, text) => `<a href="${href}" target="_blank" rel="noopener">${text}</a>`;
+document.getElementById('srcList').innerHTML = [
+  [t('Results {y}', { y: '2026' }), t('{rik} polling-station export, data as of {d}.', { rik: ext('https://www.rik.parlament.gov.rs/', t('RIK')), d: D.E['2026'].updated })],
+  [t('Results {y}', { y: '2023' }), t('Collected from the {page}, data as of {d}. The RIK export does not work for this election.',
+    { page: ext('https://www.rik.parlament.gov.rs/542645/sr/rezultati/sr/', t('RIK results page')), d: D.E['2023'].updated })],
+  [t('Boundaries'), t('Municipalities: {gadm}, for non-commercial use. Other countries: {ne}, public domain.',
+    { gadm: ext('https://gadm.org/', 'GADM 4.1'), ne: ext('https://www.naturalearthdata.com/', 'Natural Earth') })],
+  [t('Polling stations abroad'), t('2023: cities from the list of the {mfa} of 14.12.2023. 2026: cities and addresses from the RIK decision, as transcribed by {dg}.',
+    { mfa: ext('https://www.mfa.gov.rs/lat/mediji/vesti/glasanje-na-81-birackom-mestu-u-inostanstvu', t('Ministry of Foreign Affairs')),
+      dg: ext('https://dijaspora-glasanje.vercel.app/', 'dijaspora-glasanje.vercel.app') })],
+  [t('Prisons'), t('Names and addresses from the {dec} (2022).',
+    { dec: ext('https://www.rik.parlament.gov.rs/extfile/sr/13692/Resenje%20o%20odredjivanju%20glasackih%20mesta%20u%20zavodima%20c.doc', t('RIK decision on voting places in prisons')) })],
+  [t('Locations'), t('Cities abroad and prisons located with {nom}. Data © {osm} contributors.',
+    { nom: ext('https://nominatim.openstreetmap.org/', 'Nominatim'), osm: ext('https://www.openstreetmap.org/copyright', 'OpenStreetMap') })],
+  [t('Method'), t('Shares are of valid votes. Turnout is of registered voters at reported stations. Combined: Niš (5 city municipalities), Vranje (with Vranjska Banja), Požarevac (with Kostolac), Užice (with Sevojno).')],
+  [t('Map'), t('Drawn with {d3}.', { d3: ext('https://d3js.org/', 'D3') })],
+  [t('Details'), t('All decisions and sources: {dec}. Code and data: {repo}.', { dec: ext(REPO + '/blob/main/DECISIONS.md', 'DECISIONS.md'), repo: ext(REPO, 'GitHub') })],
+].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+const srcDlg = document.getElementById('sources');
+document.getElementById('srcBtn').onclick = () => srcDlg.showModal();
+document.getElementById('srcClose').onclick = () => srcDlg.close();
+srcDlg.addEventListener('click', e => {  // click on the backdrop
+  const r = srcDlg.getBoundingClientRect();
+  if (e.target === srcDlg && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom)) srcDlg.close();
+});
+const listSel = document.getElementById('listSel');
+listSel.onchange = () => { listK[view] = +listSel.value; save(); paint(); };
+function renderControls() {
+  document.getElementById('years').innerHTML = [...YEARS, 'change'].map(y =>
+    `<button type="button" id="y-${y}" data-view="${y}" aria-pressed="${view === y}" ${y === 'change' ? `title="${t('Change {y0}→{y1}', { y0: Y0, y1: Y1 })}"` : ''}>${y === 'change' ? t('Change') : y}</button>`).join('');
+  document.getElementById('levels').innerHTML = LEVELS.map(([k, l]) =>
+    `<button type="button" id="lv-${k}" data-level="${k}" aria-pressed="${level === k}">${l}</button>`).join('');
+  document.querySelectorAll('#levels button').forEach(b => b.onclick = () => {
+    if (level === b.dataset.level) return;
+    level = b.dataset.level; selected = null; selPath.attr('d', null); hovPath.attr('d', null); save(); paint(); renderPanel();
+  });
+  document.getElementById('cats').innerHTML = [['serbia', 'Serbia'], ['region', 'Region'], ['abroad', 'Abroad']].map(([k, l]) =>
+    `<button type="button" id="cat-${k}" data-cat="${k}" aria-pressed="${cat === k}">${t(l)}</button>`).join('');
+  document.querySelectorAll('#cats button').forEach(b => b.onclick = () => {
+    if (cat === b.dataset.cat) return;
+    cat = b.dataset.cat; selected = null; selPath.attr('d', null); tip.hidden = true; save();
+    svg.call(zoom.transform, d3.zoomIdentity); layout(); paint(); renderPanel();
+  });
+  const cur = isChange() ? cmode : ymode;
+  document.getElementById('modes').innerHTML = MODES[isChange() ? 'change' : 'year'].map(([k, label]) =>
+    `<button type="button" id="m-${k}" data-mode="${k}" aria-pressed="${k === cur}">${label()}</button>`).join('');
+  document.querySelectorAll('#years button').forEach(b => b.onclick = () => { view = b.dataset.view; save(); paint(); renderPanel(); });
+  document.querySelectorAll('#modes button').forEach(b => b.onclick = () => { if (isChange()) cmode = b.dataset.mode; else ymode = b.dataset.mode; save(); paint(); });
+  // # / % and the eye: Turnout tabs. In the Region view only Change uses # / % (it has no numbers on the map).
+  const numctl = document.getElementById('numctl');
+  numctl.hidden = !numMode() || isAbroad() || (isRegion() && !isChange());
+  for (const k of ['abs', 'pct']) document.getElementById('u-' + k).setAttribute('aria-pressed', tunit === k);
+  document.getElementById('u-abs').title = t(isChange() ? 'Change in number of voters (thousands)' : 'Numbers: voters (thousands)');
+  document.getElementById('u-pct').title = t(isChange() ? 'Change in turnout (points)' : 'Numbers: turnout (%)');
+  const zn = document.getElementById('znum');
+  zn.hidden = isRegion();
+  zn.setAttribute('aria-pressed', showNums);
+  zn.innerHTML = showNums ? EYE : EYE_OFF;
+  zn.setAttribute('aria-label', t(showNums ? 'Hide the numbers on the map' : 'Show the numbers on the map'));
+  listSel.hidden = isChange() || ymode !== 'share';
+  if (!listSel.hidden) {
+    listSel.innerHTML = D.E[view].lists.map((l, k) => `<option value="${k}">${esc(lname(view, k))} (${pct(NAT.y[view].share[k])})</option>`).join('');
+    listSel.value = listK[view];
+  }
+}
+const FINDABLE = [...U, ...COUNTRIES.slice().sort((a, b) => a.name.localeCompare(b.name, D.locale))];
+document.getElementById('unitNames').innerHTML = FINDABLE.map(u => `<option value="${esc(u.name)}">`).join('');
+document.getElementById('search').addEventListener('change', e => {
+  const q = e.target.value.trim().toLowerCase(); if (!q) return;
+  const u = FINDABLE.find(x => x.name.toLowerCase() === q) || FINDABLE.find(x => x.name.toLowerCase().startsWith(q))
+    || FINDABLE.find(x => x.munis.some(m => m.toLowerCase().includes(q)) || (x.en && x.en.toLowerCase().startsWith(q)));
+  if (!u) return;
+  const want = u.country ? (isRegion() && inRegion(u) ? 'region' : 'abroad') : 'serbia';
+  if (cat !== want) { cat = want; save(); svg.call(zoom.transform, d3.zoomIdentity); layout(); paint(); }
+  const pick = u.feat && level !== 'municipality' ? u.feat.grp[level] : u;
+  select(pick); if (pick.feat) zoomTo([pick.feat], 6); else if (pick.group) zoomTo(pick.feats, 6);
+  else if (pick.country && isRegion()) zoomTo([{ type: 'Feature', geometry: D.countries[pick.cc].geometry }], 6);
+  e.target.value = '';
+});
+
+function paint() {
+  readColors();
+  FLIPC = Object.fromEntries(FLIPS.map(([k, c]) => [k, c()]));
+  patBg.attr('fill', C.nodata);
+  B = binsFor();
+  renderControls();
+  document.getElementById('mapwrap').classList.toggle('is-abroad', isAbroad());
+  document.getElementById('mapwrap').classList.toggle('is-region', isRegion());
+  abroadEl.hidden = !isAbroad();
+  paths.attr('fill', f => fillOf(shapeUnit(f)))
+    .style('stroke', level === 'municipality' && !isRegion() ? null : f => { const c = fillOf(shapeUnit(f)); return c.startsWith('url') ? 'none' : c; });
+  drawBorders(); drawPrisons(); drawRegion();
+  drawLabels(); renderOffmap();
+  const lh = legendHtml();
+  if (isAbroad()) renderAbroad(lh); else document.getElementById('legend').innerHTML = lh;
+  // The list menu sits on the map, or above the country blocks in the Abroad view
+  (isAbroad() ? abroadEl.querySelector('.legend.static') : document.getElementById('maptop')).appendChild(listSel);
+}
+
+// ---------- abroad: country blocks with polling stations as dots ----------
+const abroadEl = document.getElementById('abroad');
+const CW = 240, CH = 160;  // block drawing size (viewBox)
+for (const c of COUNTRIES) {
+  const geom = { type: 'Feature', geometry: D.countries[c.cc].geometry };
+  const pts = YEARS.flatMap(y => c.pts[y].map(p => [p.lon, p.lat]));
+  const [[x0, y0], [x1, y1]] = d3.geoBounds(geom);
+  const proj = d3.geoAzimuthalEqualArea().rotate([-(x0 + x1) / 2, -(y0 + y1) / 2]);
+  proj.fitExtent([[10, 10], [CW - 10, CH - 10]], { type: 'FeatureCollection', features: [geom, { type: 'Feature', geometry: { type: 'MultiPoint', coordinates: pts } }] });
+  c.proj = proj;
+  c.landD = d3.geoPath(proj)(geom);
+}
+// Stations at the same place sit in a small spiral around it, so each one stays visible.
+function dotsSvg(c) {
+  const ys = isChange() ? [Y1, Y0] : [view];
+  const groups = new Map();
+  for (const y of ys) for (const p of c.pts[y]) {
+    const k = p.lon + ',' + p.lat;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(p);
+  }
+  let out = '';
+  for (const arr of groups.values()) {
+    const [x, y] = c.proj([arr[0].lon, arr[0].lat]);
+    arr.forEach((p, i) => {
+      const r = 3.9 * Math.sqrt(i), t = i * 2.39996;
+      const cx = (x + r * Math.cos(t)).toFixed(1), cy = (y + r * Math.sin(t)).toFixed(1);
+      const id = `data-y="${p.year}" data-i="${STN[p.year].indexOf(p)}"`;
+      if (isChange()) {
+        out += p.year === Y0 ? `<circle class="dot old" cx="${cx}" cy="${cy}" r="3" ${id}/>`
+          : `<circle class="dot" cx="${cx}" cy="${cy}" r="3.3" fill="var(--ink)" ${id}/>`;
+      } else {
+        const f = fillOf(p);
+        out += `<circle class="dot" cx="${cx}" cy="${cy}" r="3.4" fill="${f.startsWith('url') ? C.nodata : f}" ${id}/>`;
+      }
+    });
+  }
+  return out;
+}
+function renderAbroad(legend) {
+  const y = isChange() ? Y1 : view;
+  const list = COUNTRIES.filter(c => isChange() ? c.y[Y0].n || c.y[Y1].n : c.y[view].n)
+    .sort((a, b) => b.y[y].voted - a.y[y].voted || b.y[Y0].voted - a.y[Y0].voted || a.name.localeCompare(b.name, D.locale));
+  const cards = list.map(c => {
+    const f = fillOf(c), sw = f.startsWith('url') ? C.nodata : f;
+    const land = isChange() ? f : 'var(--land)';
+    const sub = isChange() ? t('{y0}: {n0} · {y1}: {n1} stations · {v0} → {v1} voters', { y0: Y0, n0: c.y[Y0].n, y1: Y1, n1: c.y[Y1].n, v0: kfmt(c.y[Y0].voted) + t('k'), v1: kfmt(c.y[Y1].voted) + t('k') })
+      : `${stations(c.y[view].n)} · ${t('{v} voters', { v: kfmt(c.y[view].voted) + t('k') })}`;
+    return `<div class="card" role="button" tabindex="0" data-cc="${c.cc}" aria-pressed="${selected === c}" title="${esc(c.name)}">
+      <div class="ch"><span class="cn">${esc(c.name)}</span><span class="cv"><span class="sw" style="background:${sw}"></span>${offVal(c)}</span></div>
+      <svg viewBox="0 0 ${CW} ${CH}" role="img" aria-label="${esc(c.name)}: ${t('polling stations')}"><path class="land" d="${c.landD}" fill="${land}"/>${dotsSvg(c)}</svg>
+      <div class="cs"><span>${sub}</span>${zoomPts(c).length > 1 ? `<button type="button" class="zbtn" data-zoom="${c.cc}" aria-label="${t('Zoom into {c}', { c: esc(c.name) })}" title="${t('Zoom into {c}', { c: esc(c.name) })}">${t('Zoom')}</button>` : ''}</div></div>`;
+  }).join('');
+  const aunits = isChange() && cmode === 'turnout' ? `<div class="seg sm aunits" role="group" aria-label="${t('Turnout in voters or in percent')}">${
+    [['abs', '#', 'Change in number of voters (thousands)'], ['pct', '%', 'Change in turnout (points)']].map(([k, l, ti]) =>
+      `<button type="button" data-unit="${k}" title="${t(ti)}" aria-pressed="${tunit === k}">${l}</button>`).join('')}</div>` : '';
+  abroadEl.innerHTML = `<div class="legend static">${aunits ? `<div style="flex-basis:100%">${aunits}</div>` : ''}${legend}</div><div class="cards">${cards}</div>`;
+  abroadEl.querySelector('.legend.static').appendChild(listSel);  // the list menu (List share view) above the blocks
+  renderZoom();
+}
+// Polling stations of a country in the current view (both elections in the Change view)
+const zoomPts = c => (isChange() ? [Y1, Y0] : [view]).flatMap(y => c.pts[y]);
+const azEl = document.getElementById('azoom');
+let zoomCC = null, zoomT = d3.zoomIdentity;
+function openZoom(cc) { zoomCC = cc; zoomT = d3.zoomIdentity; select(COUNTRY[cc]); }
+function closeZoom() { zoomCC = null; zoomT = d3.zoomIdentity; tip.hidden = true; renderZoom(); }
+function renderZoom() {
+  azEl.hidden = !(isAbroad() && zoomCC);
+  if (azEl.hidden) return;
+  const c = COUNTRY[zoomCC], f = fillOf(c), sw = f.startsWith('url') ? C.nodata : f;
+  azEl.innerHTML = `<div class="zh"><button type="button" id="zback">← ${t('All countries')}</button><h3>${esc(c.name)}</h3>
+    <span class="cv"><span class="sw" style="background:${sw}"></span>${offVal(c)}</span><span class="sp"></span>
+    <button type="button" id="zzin" aria-label="${t('Zoom in')}">+</button><button type="button" id="zzout" aria-label="${t('Zoom out')}">−</button><button type="button" id="zzall" title="${t('Show the whole country')}">${t('All')}</button>
+    <p class="note">${t('Scroll or pinch to zoom, drag to move. Each dot is one polling station at its city; stations in the same city sit in a small spiral.')}</p></div>
+    <svg id="zsvg" role="img" aria-label="${esc(c.name)}: ${t('polling stations')}"></svg>`;
+  const svgZ = d3.select('#zsvg'), box = svgZ.node().getBoundingClientRect(), w = box.width, h = Math.max(box.height, 200);
+  svgZ.attr('viewBox', `0 0 ${w} ${h}`);
+  const geom = { type: 'Feature', geometry: D.countries[c.cc].geometry };
+  const pts = zoomPts(c);
+  const proj = d3.geoAzimuthalEqualArea().rotate(c.proj.rotate())
+    .fitExtent([[30, 30], [w - 30, h - 30]], { type: 'FeatureCollection', features: [geom, { type: 'Feature', geometry: { type: 'MultiPoint', coordinates: pts.map(p => [p.lon, p.lat]) } }] });
+  const gz = svgZ.append('g');
+  gz.append('path').attr('class', 'land').attr('d', d3.geoPath(proj)(geom)).attr('fill', isChange() ? f : 'var(--land)');
+  const groups = d3.groups(pts, p => p.lon + ',' + p.lat);
+  const items = [], places = [];
+  for (const [, arr] of groups) {
+    const [x, y] = proj([arr[0].lon, arr[0].lat]);
+    arr.forEach((p, i) => items.push({ p, x, y, ox: 6.2 * Math.sqrt(i) * Math.cos(i * 2.39996), oy: 6.2 * Math.sqrt(i) * Math.sin(i * 2.39996) }));
+    places.push({ x, y, name: arr[0].city, rad: 6.2 * Math.sqrt(arr.length - 1) + 6 });
+  }
+  const dots = gz.selectAll('circle').data(items).join('circle')
+    .attr('class', d => 'dot' + (isChange() && d.p.year === Y0 ? ' old' : ''))
+    .attr('fill', d => { if (isChange()) return d.p.year === Y0 ? 'none' : 'var(--ink)'; const x = fillOf(d.p); return x.startsWith('url') ? C.nodata : x; })
+    .attr('data-y', d => d.p.year).attr('data-i', d => STN[d.p.year].indexOf(d.p));
+  const lbls = gz.selectAll('text').data(places).join('text').attr('class', 'clbl').text(d => d.name);
+  const place = k => {
+    dots.attr('cx', d => d.x + d.ox / k).attr('cy', d => d.y + d.oy / k).attr('r', d => (isChange() && d.p.year === Y0 ? 4 : 4.6) / k);
+    lbls.attr('x', d => d.x + d.rad / k).attr('y', d => d.y).style('font-size', 11.5 / k + 'px').style('stroke-width', 3 / k + 'px');
+  };
+  const zm = d3.zoom().scaleExtent([1, 300]).on('zoom', e => { zoomT = e.transform; gz.attr('transform', e.transform); place(e.transform.k); });
+  svgZ.call(zm).on('dblclick.zoom', null);
+  svgZ.call(zm.transform, zoomT);
+  place(zoomT.k);
+  const anim = ms => svgZ.transition().duration(ms * motion());
+  document.getElementById('zzin').onclick = () => anim(250).call(zm.scaleBy, 1.8);
+  document.getElementById('zzout').onclick = () => anim(250).call(zm.scaleBy, 1 / 1.8);
+  document.getElementById('zzall').onclick = () => anim(400).call(zm.transform, d3.zoomIdentity);
+  document.getElementById('zback').onclick = closeZoom;
+}
+azEl.addEventListener('pointermove', e => {
+  const d = e.target.closest('circle.dot');
+  if (!d || e.pointerType === 'touch') { tip.hidden = true; return; }
+  showTip(e, stationTip(STN[d.dataset.y][+d.dataset.i]));
+});
+azEl.addEventListener('pointerleave', () => { tip.hidden = true; });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && zoomCC && !srcDlg.open) closeZoom(); });
+window.addEventListener('resize', () => { if (zoomCC && isAbroad()) renderZoom(); });
+function stationTip(p) {
+  const s = p.s, a = p.y[p.year], y = p.year;
+  const head = `<b>${t('PS')} ${s[2]} · ${esc(s[3])}</b><div class="sub">${esc(p.city)}, ${esc(COUNTRY[p.cc].name)} · ${y}</div>`;
+  if (!a.valid) return head + t('No results reported');
+  const rows = a.order.slice(0, 3).map(k => `<span class="sw" style="background:${listColor(y, k)}"></span><span>${esc(lname(y, k))}</span><span class="r">${pct(a.share[k])}</span>`).join('');
+  return head + `<div class="kv">${rows}</div><div style="margin-top:6px;color:var(--ink-2)">${t('Turnout {p} · {v} of {r} registered voted', { p: pct(a.turnout), v: fmt(a.voted), r: fmt(a.reg) })}</div>`;
+}
+abroadEl.addEventListener('pointermove', e => {
+  const d = e.target.closest('circle.dot');
+  if (!d || e.pointerType === 'touch') { tip.hidden = true; return; }
+  showTip(e, stationTip(STN[d.dataset.y][+d.dataset.i]));
+});
+abroadEl.addEventListener('pointerleave', () => { tip.hidden = true; });
+abroadEl.addEventListener('click', e => {
+  const u = e.target.closest('[data-unit]');
+  if (u) { tunit = u.dataset.unit; save(); paint(); return; }
+  const z = e.target.closest('[data-zoom]');
+  if (z) { openZoom(z.dataset.zoom); return; }
+  const card = e.target.closest('.card');
+  if (card) select(selected === COUNTRY[card.dataset.cc] ? null : COUNTRY[card.dataset.cc]);
+});
+abroadEl.addEventListener('keydown', e => {
+  const card = e.target.closest('.card');
+  if (card && !e.target.closest('[data-zoom]') && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); card.click(); }
+});
+
+layout(); paint(); renderPanel();
+new ResizeObserver(() => layout()).observe(document.getElementById('map'));
+const repaint = () => { paint(); renderPanel(); };
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', repaint);
+new MutationObserver(repaint).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+</script>
+</body>
+</html>

@@ -1,0 +1,2 @@
+# Tools for testing the page (tools/check_page.py). The map build itself needs only the Python standard library.
+playwright==1.64.1

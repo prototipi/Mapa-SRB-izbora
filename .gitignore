@@ -1,0 +1,13 @@
+# Local environment and test output
+.venv/
+__pycache__/
+test_output/
+
+# Raw responses of the 2023 scraper (62 MB). scrape_rik.py recreates them.
+cache/
+
+# GADM boundaries: the license does not allow redistribution. Run tools/fetch_gadm.py.
+geo/gadm41_*.json
+
+# Out-of-date single-year page
+mapa_izbora_2023.html
